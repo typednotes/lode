@@ -1,0 +1,43 @@
+name: Lean Action CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # linen's native build dependencies (it builds its FFI as a dependency).
+      - run: sudo apt-get update && sudo apt-get install -y libpq-dev libssl-dev pkg-config unzip zlib1g-dev libsecret-1-dev jq
+      - uses: leanprover/lean-action@v1
+      - run: lake build LodeTests
+      # A real agent loop over a real repository, with a scripted model.
+      - run: test/e2e.sh
+      # The GitHub/GitLab and model paths, against a mock liaison.
+      - run: test/liaison.sh
+
+  # lode against a real lun (its DAGs are on linen's released
+  # `Control.Reactive`), with a linen checkout for the test project's path
+  # dependency, both next to lode, as `test/lun.sh` expects.
+  lun:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: lode
+      - uses: actions/checkout@v5
+        with:
+          repository: typednotes/lun
+          path: lun
+      - uses: actions/checkout@v5
+        with:
+          repository: typednotes/linen
+          ref: ${{ vars.LINEN_E2E_REF || 'v1.5.0' }}
+          path: linen
+      - run: sudo apt-get update && sudo apt-get install -y libpq-dev libssl-dev pkg-config unzip zlib1g-dev libsecret-1-dev jq
+      - run: curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain none
+      - run: echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - run: lode/test/lun.sh lun linen
