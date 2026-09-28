@@ -14,8 +14,8 @@
   <a href="https://github.com/typednotes/lode/pkgs/container/lode"><img src="https://img.shields.io/badge/ghcr.io-typednotes%2Flode-blue?logo=docker" alt="Docker image"></a>
   <a href="https://github.com/typednotes/lode/tags"><img src="https://img.shields.io/github/v/tag/typednotes/lode?label=version&sort=semver" alt="Version"></a>
   <a href="https://lean-lang.org/"><img src="https://img.shields.io/badge/Lean-v4.34.0-blue" alt="Lean v4.34.0"></a>
-  <a href="https://github.com/typednotes/linen"><img src="https://img.shields.io/badge/built%20on-linen%20v1.6.2-c9b896" alt="Built on linen v1.6.2"></a>
-  <a href="https://github.com/typednotes/liaison"><img src="https://img.shields.io/badge/speaks-liaison%20v0.5.3-0e6b6f" alt="Speaks liaison v0.5.3"></a>
+  <a href="https://github.com/typednotes/linen"><img src="https://img.shields.io/badge/built%20on-linen%20v1.7.0-c9b896" alt="Built on linen v1.7.0"></a>
+  <a href="https://github.com/typednotes/liaison"><img src="https://img.shields.io/badge/speaks-liaison%20v0.5.5-0e6b6f" alt="Speaks liaison v0.5.5"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License: Apache 2.0"></a>
 </p>
 
@@ -91,7 +91,7 @@ lake build
 ### Test
 
 ```sh
-lake build LodeTests          # unit tests (#guard): every parser and pure rule
+lake test          # unit tests (#guard): every parser and pure rule
 test/e2e.sh                   # a real agent loop (scripted model) over a real repository
 test/liaison.sh               # GitHub, GitLab and the model through a mock liaison
 test/lun.sh ../lun ../linen   # with a real lun (>= 0.2.0) and a linen checkout
@@ -243,22 +243,92 @@ isError}]`), `compaction` (`summary`, `firstKept`), `event` (`kind`:
 | `LODE_MAX_STEPS` | `200` | model calls per run |
 | `LODE_MODEL_TIMEOUT` / `LODE_GIT_TIMEOUT` / `LODE_CHECK_TIMEOUT` | `600` / `600` / `1800` | seconds |
 | `LODE_PACKAGE_CACHE` | — | pre-built linen checkouts, `{cache}/linen/{rev}` |
-| `LODE_LINEN_REV` / `LODE_TOOLCHAIN` | `v1.6.2` / `leanprover/lean4:v4.34.0` | what new projects are told to use |
+| `LODE_LINEN_REV` / `LODE_TOOLCHAIN` | `v1.7.0` / `leanprover/lean4:v4.34.0` | what new projects are told to use |
 | `LODE_ALLOW_LOCAL` | — | `1`: `file://` repositories and the `scripted` model. Tests only |
 
 ## Docker
 
 Images are published to `ghcr.io/typednotes/lode` — `edge` from `main`, and
 `latest`, `X.Y.Z` and `X.Y` from release tags. The image carries the Lean
-toolchain and linen (`LINEN_REF`, default `v1.6.2`) pre-built in the package
+toolchain and linen (`LINEN_REF`, default `v1.7.0`) pre-built in the package
 cache, so a workspace locked to that revision does not rebuild linen.
 
+Pick the tag that matches your lun: `0.1.x` speaks lun < 0.2.0 (cells and
+DAGs); `main` (`edge`, and releases after 0.1) speaks lun ≥ 0.2.0 (functions
+and graphs).
+
+### Starting a container from the registry
+
+The package is public: no `docker login` is needed.
+
 ```sh
-docker run --rm -p 8080:8080 -v lode:/var/lib/lode \
-  -e LODE_TOKEN=... -e LODE_LIAISON_URL=http://liaison:8080 \
-  -e LODE_LUN_URL=http://lun:8080 -e LODE_LUN_TOKEN=... \
-  ghcr.io/typednotes/lode:latest
+docker pull ghcr.io/typednotes/lode:edge
 ```
+
+lode is an internal service: typednotes calls it, and it calls liaison and
+lun. Put the four on one network and address them by container name; lode
+needs no published port for typednotes to reach it at `http://lode:8080`.
+
+```sh
+docker network create typednotes            # once; liaison and lun join it too
+docker volume create lode                   # sessions, logs and checkouts
+LODE_TOKEN="$(openssl rand -hex 32)"        # typednotes needs the same value
+
+docker run -d --name lode --restart unless-stopped \
+  --network typednotes \
+  -v lode:/var/lib/lode \
+  -e LODE_TOKEN="$LODE_TOKEN" \
+  -e LODE_LIAISON_URL=http://liaison:8080 \
+  -e LODE_LUN_URL=http://lun:8080 -e LODE_LUN_TOKEN=... \
+  ghcr.io/typednotes/lode:edge
+```
+
+Give typednotes the same `LODE_TOKEN` (it sends `Authorization: Bearer …`).
+The other variables are in [Configuration](#configuration); the image already
+sets `LODE_WORKDIR`, `LODE_PACKAGE_CACHE` and `LODE_LINEN_REV`, so leave them
+alone.
+
+Check it:
+
+```sh
+docker logs lode                            # "lode listening on :8080", and warnings for what is unset
+docker run --rm --network typednotes curlimages/curl -fsS http://lode:8080/_health && echo ok
+```
+
+To reach it from the host too (development), publish on loopback only:
+`-p 127.0.0.1:8080:8080`.
+
+Notes:
+
+- **State.** Sessions live in `/var/lib/lode`. A named volume, as above, gets
+  the image's ownership; a bind mount must be writable by uid `10001`
+  (`chown 10001 /srv/lode`). Credentials are never written there: after a
+  restart, sessions resume once typednotes sends fresh warrants.
+- **Outbound network.** Model and GitHub/GitLab API calls go through liaison,
+  but the container itself still needs egress to `github.com` and
+  `codeload.github.com` (GitHub tarball downloads, `git`/`lake` fetching a
+  project's dependencies) and to Lean's release servers if a project asks for
+  another toolchain. The image carries the system CA bundle for those.
+- **One lode per trust domain.** `bash` runs whatever the model asks inside the
+  container, so the container is the isolation boundary: give it no
+  credentials of its own and do not share it across organisations (see
+  [Project status](#project-status)).
+- **Platform.** Images are `linux/amd64` only. On Apple Silicon add
+  `--platform linux/amd64` (emulated, so `lake build` is slow), or build the
+  image locally.
+- `podman` takes the same commands.
+
+Standalone, for trying lode without liaison (a public repository, read-only,
+and a model key sent directly to the provider):
+
+```sh
+docker run --rm -p 127.0.0.1:8080:8080 -v lode:/var/lib/lode \
+  -e LODE_TOKEN=dev \
+  -e LODE_MODEL_NAME=claude-sonnet-4-5 -e LODE_MODEL_API_KEY="$ANTHROPIC_API_KEY" \
+  ghcr.io/typednotes/lode:edge
+```
+
+### Building the image
 
 To build the image locally:
 

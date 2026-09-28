@@ -3,7 +3,7 @@
   an assistant message, never splitting a call from its result), and what
   the summarizer reads.
 -/
-import LodeTests.Util
+import LodeTest.Util
 import Lode.Compaction
 
 open Lode Lode.Compaction

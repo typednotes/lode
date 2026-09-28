@@ -3,7 +3,7 @@
   becomes, and what it may not), `read`'s numbering, `edit`'s replacement
   rule, truncation, and the tool list agents see.
 -/
-import LodeTests.Util
+import LodeTest.Util
 import Lode.Tools
 import Lode.Prompt
 

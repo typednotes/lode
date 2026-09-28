@@ -67,7 +67,7 @@ structure Config where
   /-- Pre-built packages: `{cache}/linen/{rev}`. -/
   packageCache : Option FilePath := none
   /-- What new projects should require. -/
-  linenRev : String := "v1.6.2"
+  linenRev : String := "v1.7.0"
   toolchain : String := "leanprover/lean4:v4.34.0"
 
 -- ── Time ────────────────────────────────────────────────────────────────────
@@ -272,7 +272,7 @@ def Session.transport (s : Session) : IO Model.Transport := do
 private def publishedManifest (s : Session) : IO String := do
   let m ← s.info.get
   let file := (if m.source.path.isEmpty then "" else m.source.path ++ "/") ++ "lun.json"
-  let r ← Process.run "git" #["show", s!"{m.workspace.localBase}:{file}"] s.cfg.gitTimeoutMs
+  let r ← System.Process.run "git" #["show", s!"{m.workspace.localBase}:{file}"] s.cfg.gitTimeoutMs
     (cwd := checkoutDir s.cfg s.id) (env := Process.hermeticGit)
   unless r.ok do
     throw (IO.userError s!"{file} is not in the published commit {m.workspace.remoteHead}: write it, then publish")

@@ -21,6 +21,7 @@ import Lean.Data.Json
 import Linen.Network.WebApp
 import Linen.Network.WebApp.Extra.Middleware.HealthCheckEndpoint
 import Linen.Network.WebApp.Extra.Middleware.RequestSizeLimit
+import Linen.Crypto.ConstantTime
 import Lode.Session
 
 namespace Lode
@@ -55,20 +56,13 @@ private def readJson (req : Network.WebApp.Request) : IO (Except String Json) :=
   let some t := String.fromUTF8? bytes | return .error "the request body is not UTF-8"
   return (Json.parse (if t.trimAscii.isEmpty then "{}" else t)).mapError (s!"the request is not JSON: " ++ ·)
 
-/-- Compare two strings in time independent of where they differ. -/
-def constantTimeEq (a b : String) : Bool :=
-  let x := a.toUTF8
-  let y := b.toUTF8
-  x.size == y.size &&
-    (List.range x.size).foldl (fun acc i => acc ||| (x[i]! ^^^ y[i]!)) (0 : UInt8) == 0
-
 /-- The request carries the configured token, if one is configured. -/
 def authorized (cfg : Config) (req : Network.WebApp.Request) : Bool :=
   match cfg.token with
   | none => true
   | some token =>
     match (req.requestHeaders.find? (·.1 == Data.CI.mk' "Authorization")).map (·.2) with
-    | some h => constantTimeEq h s!"Bearer {token}"
+    | some h => Crypto.ConstantTime.eqString h s!"Bearer {token}"
     | none => false
 
 /-- A query parameter's value. -/

@@ -4,11 +4,13 @@
   Every string that reaches a git command line, a file path, a URL sent to
   liaison or an id is checked here against a deliberately narrow grammar, so
   that downstream code can treat it as data of that shape and nothing else.
-  The repository and branch grammars are lun's (`lun/Lun/Validate.lean`):
-  lode writes the repositories lun reads, so both must agree on what a
-  repository URL and a branch are. All checks are pure and total.
+  The repository-URL and branch grammars are linen's (`System.Git.Remote`,
+  `Repository.parse` and `isBranchName`), which lun uses too: lode writes the
+  repositories lun reads, so both must agree on what a repository URL and a
+  branch are. All checks are pure and total.
 -/
 import Linen.System.GitFn.Descriptor
+import Linen.System.Git.Remote
 
 namespace Lode.Validate
 
@@ -39,29 +41,13 @@ def identComponent (s : String) : Bool :=
     (lun's `Validate.functionName`). -/
 def functionName (s : String) : Bool := s.length ≤ 128 && (s.splitOn ".").all identComponent
 
--- ── Git ─────────────────────────────────────────────────────────────────────
-
-/-- A branch name, per `git check-ref-format --branch` (as lun checks it). -/
-def branch (s : String) : Bool :=
-  let forbidden (c : Char) := c.toNat < 0x20 || c.toNat == 0x7f || " ~^:?*[\\".contains c
-  !s.isEmpty && s.length ≤ 255 && s != "@" && !s.any forbidden &&
-    (s.splitOn "..").length == 1 &&
-    (s.splitOn "@{").length == 1 && (s.splitOn "//").length == 1 &&
-    !s.startsWith "-" && !s.startsWith "/" && !s.endsWith "/" && !s.endsWith "." &&
-    (s.splitOn "/").all fun comp => !comp.isEmpty && !comp.startsWith "." && !comp.endsWith ".lock"
-
 -- ── Paths ───────────────────────────────────────────────────────────────────
 
-/-- One path component of a repository location: `[A-Za-z0-9._-]+`, not `.`
-    or `..`. -/
-def pathComponent (s : String) : Bool :=
-  !s.isEmpty && s != "." && s != ".." &&
-    s.all fun c => c.isAlphanum || c == '.' || c == '_' || c == '-'
-
 /-- A project directory inside the repository: empty (the root) or relative
-    components separated by `/`. -/
+    components separated by `/`, each a plain segment (`[A-Za-z0-9._-]+`, not
+    `.` or `..`: `System.Git.Repository.isSegment`). -/
 def projectPath (s : String) : Bool :=
-  s.isEmpty || (s.length ≤ 512 && (s.splitOn "/").all pathComponent)
+  s.isEmpty || (s.length ≤ 512 && (s.splitOn "/").all System.Git.Repository.isSegment)
 
 /-- Resolve a path the model gives a file tool into components relative to
     the checkout.
@@ -93,71 +79,6 @@ def resolve (root : String) (base : List String) (p : String) : Except String (L
     repository lode diffs against) or `.lake` (build outputs and packages). -/
 def writable (comps : List String) : Bool :=
   !comps.isEmpty && !comps.contains ".git" && !comps.contains ".lake"
-
--- ── Repository URLs ─────────────────────────────────────────────────────────
-
-/-- Where a repository is hosted, which decides how it is fetched and
-    published. -/
-inductive Host where
-  /-- `github.com`: through liaison's `github` connection. -/
-  | github
-  /-- `gitlab.com`: through liaison's `gitlab` connection. -/
-  | gitlab
-  /-- Any other `https` host: `git`, public repositories only. -/
-  | other (host : String)
-  /-- A local repository (`file://`), accepted only in local mode (tests). -/
-  | local
-  deriving DecidableEq, Repr
-
-/-- A parsed repository URL. -/
-structure Repo where
-  host : Host
-  /-- The path segments on the host (`owner/repo`, `group/…/project`), or the
-      absolute path of a local repository. -/
-  segments : List String
-  /-- The canonical URL to clone (and to hand to lun). -/
-  cloneUrl : String
-  deriving DecidableEq, Repr
-
-/-- The provider name liaison knows the host's connections by. -/
-def Host.provider? : Host → Option String
-  | .github => some "github"
-  | .gitlab => some "gitlab"
-  | _ => none
-
-/-- Parse a repository URL, the way it is written for `git clone`
-    (lun's grammar): `https://github.com/owner/repo(.git)`,
-    `https://gitlab.com/group/…/project(.git)`, another `https` host, or
-    `file:///abs/path` when `allowLocal`. -/
-def repo (url : String) (allowLocal : Bool := false) : Except String Repo := do
-  if url.length > 1024 then throw "the repository URL is too long"
-  let strip (s : String) : String :=
-    let s := if s.endsWith "/" then (s.dropEnd 1).toString else s
-    if s.endsWith ".git" then (s.dropEnd 4).toString else s
-  if url.startsWith "file://" then
-    unless allowLocal do throw "file:// repositories are only accepted in local mode"
-    let path := (url.drop 7).toString
-    let segs := (path.splitOn "/").drop 1
-    unless path.startsWith "/" && segs.all pathComponent do
-      throw "a file:// URL must name an absolute path of plain components"
-    return { host := .local, segments := segs, cloneUrl := url }
-  unless url.startsWith "https://" do throw "the repository URL must be https://"
-  let rest := strip (url.drop 8).toString
-  match rest.splitOn "/" with
-  | [] | [_] => throw "the repository URL names no repository"
-  | hostName :: segs =>
-    unless !hostName.isEmpty && hostName.all (fun c => c.isAlphanum || c == '.' || c == '-') do
-      throw "the repository host must be a plain DNS name (no userinfo or port)"
-    unless segs.all pathComponent do
-      throw "the repository path must be plain components (no query, fragment or dot segments)"
-    let host : Host := match hostName.toLower with
-      | "github.com" => .github
-      | "gitlab.com" => .gitlab
-      | h => .other h
-    if host == .github && segs.length != 2 then
-      throw "a GitHub repository URL is https://github.com/OWNER/REPO"
-    let cloneUrl := s!"https://{hostName.toLower}/{"/".intercalate segs}.git"
-    return { host, segments := segs, cloneUrl }
 
 -- ── Model endpoints ─────────────────────────────────────────────────────────
 

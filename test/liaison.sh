@@ -42,6 +42,7 @@ cat > "$work/script.json" <<'JSON'
     {"type": "tool_use", "id": "toolu_2", "name": "bash", "input": {"command": "rm Old.txt && printf '#!/bin/sh\\n' > run.sh && chmod +x run.sh"}}],
    "stop_reason": "tool_use"},
   {"content": [{"type": "tool_use", "id": "toolu_3", "name": "publish", "input": {"message": "Add Demo.Hello"}}], "stop_reason": "tool_use"},
+  {"_status": 429, "_headers": {"retry-after": "3"}},
   {"content": [{"type": "text", "text": "Published."}]},
   {"content": [{"type": "text", "text": "Writing."},
     {"type": "tool_use", "id": "toolu_4", "name": "write", "input": {"path": "Demo/Hello.lean", "content": "def Demo.hello := \"hi\"\n"}},
@@ -136,6 +137,11 @@ body2="$(jq -r .call.body <<<"$(sed -n 2p <<<"$model_calls")")"
 jq -e '.messages[2].role == "user" and ([.messages[2].content[] | .tool_use_id] == ["toolu_1", "toolu_2"])' <<<"$body2" >/dev/null \
   || fail "the second request carries the tool results: $body2"
 pass "the model is reached through liaison, with tool results threaded back"
+# The third call was rate limited (429, `retry-after: 3`): the same request
+# again, after the 3 s the provider asked for (backoff alone would be ≤ 2 s).
+jq -e -s '(.[2].call.body == .[3].call.body) and (.[3].received - .[2].received >= 2.8)' <<<"$model_calls" >/dev/null \
+  || fail "a rate-limited call is retried after its Retry-After: $(jq -c -s 'map({received, n: (.call.body | length)})' <<<"$model_calls")"
+pass "a rate-limited model call is retried after the provider's Retry-After"
 expect "usage is accumulated" 200 '.usage.input == 300 and .usage.output == 30' "$(api GET "/v0/sessions/$gh")"
 
 # ── GitLab ──────────────────────────────────────────────────────────────────

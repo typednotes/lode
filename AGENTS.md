@@ -1,8 +1,8 @@
 # lode — agent notes
 
 `lode` is the coding agent of typednotes: an HTTP service (Lean 4, on
-`linen` pinned `v1.6.2`, speaking to liaison with liaison's own wire module
-`Liaison.Wire`, pinned `v0.5.3`) that runs model-driven sessions over a branch of a
+`linen` pinned `v1.7.0`, speaking to liaison with liaison's own wire module
+`Liaison.Wire`, pinned `v0.5.5`) that runs model-driven sessions over a branch of a
 git repository and writes the Lean projects `lun` builds and serves
 (functions, graphs, `lun.json`; lun's and linen's vocabulary — lun ≥ 0.2.0
 has no `cells`/`dags` aliases, and neither has lode). lode is the writer; lun is the runner — do not confuse
@@ -10,11 +10,13 @@ the two. See `README.md` for the API and the design.
 
 ## Layout
 
-Pure modules (unit-tested with `#guard` in `LodeTests/`):
+Pure modules (unit-tested with `#guard` in `LodeTest/`):
 
-- `Lode/Validate.lean` — every grammar: ids, branch, repository URL (lun's,
-  so both agree), model base URL, and `resolve`/`writable` (tool paths: never
-  outside the checkout, never into `.git`/`.lake`).
+- `Lode/Validate.lean` — lode's grammars: ids, project path, model base URL,
+  and `resolve`/`writable` (tool paths: never outside the checkout, never
+  into `.git`/`.lake`). Repository URLs and branch names are linen's
+  `System.Git.Remote` (`Repository.parse`, `isBranchName`), which lun uses
+  too, so both agree.
 - `Lode/Liaison.lean` — credentials (a warrant decoded by liaison's own
   `Liaison.Wire.decodeWarrant`, the grant read with `Request.ofWarrant`, the
   account checked with `accountMatchesResource`) and `call`, which builds the
@@ -27,11 +29,12 @@ Pure modules (unit-tested with `#guard` in `LodeTests/`):
 - `Lode/Model.lean` — `Config`, the Anthropic Messages and OpenAI Chat
   Completions wire formats (`anthropicRequest`/`anthropicReply`,
   `openaiRequest`/`openaiReply`), the `scripted` API (tests), and `complete`
-  (liaison or direct transport, retries on 408/429/5xx).
+  (liaison or direct transport; retries on 408/429/5xx with linen's
+  `RetryPolicy`/`delayFor`, following a relayed `Retry-After`, stopping on
+  abort).
 - `Lode/Tools.lean` — tool specs, `Args.parse` (the model's text → typed
   arguments), `numberLines`, `applyEdit`, truncation, and `run`/`execute`
   (IO, through `Env`, which the session provides).
-- `Lode/Diagnostics.lean` — `lake build` output → diagnostics.
 - `Lode/Compaction.lean` — when to compact, where to cut (before an
   assistant entry), the summarizer's transcript and instructions.
 - `Lode/Prompt.lean` — agents (`build`, `plan`), the system prompt (lun's
@@ -43,8 +46,11 @@ Pure modules (unit-tested with `#guard` in `LodeTests/`):
 
 IO modules:
 
-- `Lode/Process.lean` — commands with a deadline and an abort flag (process
-  group killed), `hermeticGit` (host git config ignored, fixed identity).
+- `Lode/Process.lean` — the environments commands run with: `hermeticGit`
+  (linen's, plus a fixed identity) and `toolEnv` (without lode's own
+  variables). Commands run through linen's `System.Process.run` (deadline,
+  abort flag, process group killed); `check` reads `lake build` with linen's
+  `System.LakeLog`.
 - `Lode/Http.lean` — one request over linen's client.
 - `Lode/Workspace.lean` — the checkout: `open` (git clone, or the GitHub
   tarball / GitLab archive through liaison, made a local repo), `changes`
@@ -61,7 +67,7 @@ IO modules:
 ## Running tests
 
 ```
-lake build LodeTests          # unit tests
+lake test          # unit tests
 test/e2e.sh                   # scripted model, file:// repository, real git/lake
 test/liaison.sh               # GitHub/GitLab/Anthropic through test/mock_liaison.py
 test/lun.sh ../lun ../linen   # with a real lun (>= 0.2.0) and a linen checkout
@@ -86,13 +92,13 @@ nothing: if you have lun built next door, `cp -R ../lun/.lake/packages/linen
   `Data.Time.ISO8601`; commit ids `System.GitFn.CommitSha`; the workspace
   boundary linen's `FileSystem` capability (`Env.capability`,
   `ScopedPath.check?`); request size and health `requestSizeLimit` /
-  `healthCheck`; `lake-manifest.json` `Lake.Manifest.parse`. What remains
-  hand-written has no library counterpart: `Process` (linen's and core's
-  runners have no deadline, abort or process-group kill), `constantTimeEq`,
-  lake's text diagnostics (`lake --json` is only for `lake query`), lun's
-  repository and branch grammars (`Validate`; lun is a service, not a
-  library), and the agent's own logic (tools' rendering, compaction, the
-  loop). Before adding a helper, look in linen (`docs/modules.md`) and core.
+  `healthCheck`; `lake-manifest.json` `Lake.Manifest.parse`; commands
+  `System.Process`; lake's output `System.LakeLog`; repository URLs and
+  branches `System.Git.Remote`; the bearer token `Crypto.ConstantTime`;
+  retry delays `Network.HTTP.Client.delayFor`. What remains hand-written is
+  the agent's own logic (tools' rendering, compaction, the loop) and lode's
+  own grammars. Before adding a helper, look in linen (`docs/modules.md`)
+  and core; code lun needs too belongs in linen.
 - Credentials are never persisted, logged, or returned (no `ToJson`/`Repr` on
   `Credentials`). The operator's direct model key is only ever sent to the
   operator's configured endpoint (`Session.transport`).
@@ -112,7 +118,8 @@ pushing is always left to the user.
   available). Both wire formats are unit-tested, exercised end to end against
   a mock liaison (Anthropic format), and a real `api.anthropic.com` /
   `api.openai.com` answered lode's requests (with a `401` for a fake key:
-  TLS, framing and error reporting verified). Prompt quality — whether a model
+  lode's outbound TLS client, framing and error reporting verified; lode
+  itself serves plain HTTP on an internal network). Prompt quality — whether a model
   reliably drives the workflow to a green lun build — is unmeasured.
 - **Warrants expire** (the app mints them for 300 s) and lode cannot mint or
   refresh them: a long run fails with `expired` unless the caller refreshes

@@ -3,7 +3,7 @@
   bodies of GitHub's tree entries and GitLab's commit actions, URLs, and the
   linen revision a manifest locks.
 -/
-import LodeTests.Util
+import LodeTest.Util
 import Lode.Workspace
 
 open Lean (Json)

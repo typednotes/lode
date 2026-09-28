@@ -111,23 +111,23 @@ structure SessionSpec where
   message : Option String
 
 /-- The providers a repository warrant may be for. -/
-def repoProviders (repo : Validate.Repo) : Except String (List String) :=
+def repoProviders (repo : System.Git.Repository) : Except String (List String) :=
   match repo.host.provider? with
   | some p => pure [p]
   | none => throw "credentials are only usable for github.com and gitlab.com repositories"
 
-private def repoCreds (c : Liaison.CredentialsJson) (ctx : String) (repo : Validate.Repo) :
+private def repoCreds (c : Liaison.CredentialsJson) (ctx : String) (repo : System.Git.Repository) :
     Except String Liaison.Credentials := do
   Liaison.Credentials.ofJson c ctx (← repoProviders repo)
 
 /-- Check fresh credentials against the session's repository. -/
-def CredentialsRefresh.check (r : CredentialsRefresh) (repo : Validate.Repo) : Except String CredentialSet := do
+def CredentialsRefresh.check (r : CredentialsRefresh) (repo : System.Git.Repository) : Except String CredentialSet := do
   return { repo := ← r.repo.mapM (repoCreds · "credentials.repo" repo)
            model := ← r.model.mapM (Liaison.Credentials.ofJson · "credentials.model" Model.providers)
            lun := ← r.lun.mapM (repoCreds · "credentials.lun" repo) }
 
 /-- Parse a credentials refresh. -/
-def CredentialSet.parse (j : Json) (repo : Validate.Repo) : Except String CredentialSet := do
+def CredentialSet.parse (j : Json) (repo : System.Git.Repository) : Except String CredentialSet := do
   let r : CredentialsRefresh ← (fromJson? j).mapError ("credentials: " ++ ·)
   r.check repo
 
@@ -148,8 +148,8 @@ def MessageRequest.parse (j : Json) : Except String MessageRequest := do
 def SessionSpec.parse (j : Json) (defaultModel : Option Model.Config) (allowLocal : Bool) :
     Except String SessionSpec := do
   let r : SessionRequest ← (fromJson? j).mapError ("request: " ++ ·)
-  let repo ← Validate.repo r.source.url allowLocal |>.mapError ("source.url: " ++ ·)
-  unless Validate.branch r.source.branch do throw "source.branch: not a valid branch name"
+  let repo ← System.Git.Repository.parse r.source.url allowLocal |>.mapError ("source.url: " ++ ·)
+  unless System.Git.isBranchName r.source.branch do throw "source.branch: not a valid branch name"
   let path := r.source.path.getD ""
   unless Validate.projectPath path do throw "source.path: must be relative, of plain components"
   let sourceCreds ← r.source.credentials.mapM (repoCreds · "source.credentials" repo)

@@ -4,7 +4,6 @@ import Lode.Liaison
 import Lode.Message
 import Lode.Http
 import Lode.Model
-import Lode.Diagnostics
 import Lode.Tools
 import Lode.Workspace
 import Lode.Lun

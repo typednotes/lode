@@ -4,11 +4,10 @@
 # runtime image is not slim: elan and the Lean toolchain (the `check` tool
 # runs `lake build`), git and tar (workspaces), bash (the `bash` tool), and
 # every native build dependency of linen (a project's `require linen` builds
-# linen's FFI: libpq, OpenSSL, zlib and libsecret headers, `unzip` for the
-# DuckDB archive linen's lakefile downloads, a C/C++ toolchain).
+# linen's FFI), read from linen's own list at LINEN_REF.
 #
 #   podman build -t lode .
-#   podman build --build-arg LINEN_REF=v1.6.2 -t lode .
+#   podman build --build-arg LINEN_REF=v1.7.0 -t lode .
 #
 # LINEN_REF is the linen version pre-built into the package cache and the
 # one new projects are told to require (LODE_LINEN_REV). A workspace whose
@@ -16,9 +15,12 @@
 # its linen from scratch (slow, but correct).
 
 FROM docker.io/library/ubuntu:24.04 AS base
+ARG LINEN_REF=v1.7.0
+# linen's native build dependencies, from linen's own list at LINEN_REF
+# (`ci/native-deps/apt.txt`), plus what lode itself runs: tar, gzip, bash.
+ADD https://raw.githubusercontent.com/typednotes/linen/${LINEN_REF}/ci/native-deps/apt.txt /tmp/linen-apt.txt
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      curl ca-certificates git tar gzip bash build-essential pkg-config unzip \
-      libpq-dev libssl-dev zlib1g-dev libsecret-1-dev \
+      tar gzip bash $(sed 's/#.*//' /tmp/linen-apt.txt) \
     && rm -rf /var/lib/apt/lists/*
 ENV ELAN_HOME=/opt/elan \
     PATH=/opt/elan/bin:${PATH} \
@@ -38,7 +40,7 @@ RUN lake build lode
 
 # ── The package cache: linen, built, at LINEN_REF ────────────────────────────
 FROM base AS cache
-ARG LINEN_REF=v1.6.2
+ARG LINEN_REF=v1.7.0
 WORKDIR /warm
 RUN cp /tmp/lean-toolchain lean-toolchain \
     && printf '%s\n' \
@@ -60,7 +62,7 @@ RUN cp /tmp/lean-toolchain lean-toolchain \
 
 # ── Runtime ──────────────────────────────────────────────────────────────────
 FROM base AS runtime
-ARG LINEN_REF=v1.6.2
+ARG LINEN_REF=v1.7.0
 RUN useradd --system --create-home --uid 10001 lode \
     && mkdir -p /var/lib/lode \
     && chown -R lode /var/lib/lode /opt/elan

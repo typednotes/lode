@@ -3,7 +3,7 @@
   carries the published commit and the repository warrant, and lun's
   statuses read well for the model.
 -/
-import LodeTests.Util
+import LodeTest.Util
 import Lode.Lun
 
 open Lean (Json fromJson?)

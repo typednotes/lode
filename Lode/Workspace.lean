@@ -39,7 +39,7 @@ open System (FilePath)
 
 /-- Where the session's code lives. -/
 structure Source where
-  repo : Validate.Repo
+  repo : System.Git.Repository
   branch : String
   /-- The project directory within the repository (`""` for its root). -/
   path : String
@@ -59,7 +59,7 @@ instance : Lean.ToJson Source :=
 instance : Lean.FromJson Source where
   fromJson? j := do
     let s : SourceJson ← Lean.fromJson? j
-    return { repo := ← Validate.repo s.url (allowLocal := true), branch := s.branch, path := s.path }
+    return { repo := ← System.Git.Repository.parse s.url (allowLocal := true), branch := s.branch, path := s.path }
 
 /-- The checkout's link to the remote. Persisted with the session. -/
 structure State where
@@ -81,7 +81,7 @@ inductive Backend where
 
 /-- The backend for a repository, given whether the session has repository
     credentials. -/
-def backend (repo : Validate.Repo) (hasCredentials : Bool) : Backend :=
+def backend (repo : System.Git.Repository) (hasCredentials : Bool) : Backend :=
   match repo.host, hasCredentials with
   | .github, true => .github
   | .gitlab, true => .gitlab
@@ -97,13 +97,13 @@ def percentEncode (s : String) : String := Network.HTTP.Types.urlEncode s
 def branchPath (branch : String) : String := "/".intercalate ((branch.splitOn "/").map percentEncode)
 
 /-- `https://api.github.com/repos/{owner}/{repo}`. -/
-def githubBase (repo : Validate.Repo) : Except String String :=
+def githubBase (repo : System.Git.Repository) : Except String String :=
   match repo.segments with
   | [o, r] => pure s!"https://api.github.com/repos/{percentEncode o}/{percentEncode r}"
   | _ => throw "a GitHub repository is OWNER/REPO"
 
 /-- `https://gitlab.com/api/v4/projects/{url-encoded path}`. -/
-def gitlabBase (repo : Validate.Repo) : String :=
+def gitlabBase (repo : System.Git.Repository) : String :=
   s!"https://gitlab.com/api/v4/projects/{percentEncode ("/".intercalate repo.segments)}"
 
 /-- A download URL GitHub may redirect a tarball to. -/
@@ -144,8 +144,8 @@ def summarize (cs : Array Change) : String :=
 
 -- ── Local git ───────────────────────────────────────────────────────────────
 
-private def git (ctx : Context) (dir : FilePath) (args : Array String) : IO Process.Result :=
-  Process.run "git" args ctx.timeoutMs (cwd := dir) (env := Process.hermeticGit)
+private def git (ctx : Context) (dir : FilePath) (args : Array String) : IO System.Process.Result :=
+  System.Process.run "git" args ctx.timeoutMs (cwd := dir) (env := Process.hermeticGit)
 
 private def git! (ctx : Context) (dir : FilePath) (args : Array String) (what : String) : IO String := do
   let r ← git ctx dir args
@@ -174,7 +174,7 @@ def diff (ctx : Context) (dir : FilePath) (st : State) : IO String := do
   let index := dir / ".git" / s!"lode-diff-{← IO.monoNanosNow}.index"
   let env := Process.hermeticGit.push ("GIT_INDEX_FILE", some index.toString)
   let run (args : Array String) (what : String) : IO String := do
-    let r ← Process.run "git" args ctx.timeoutMs (cwd := dir) (env := env)
+    let r ← System.Process.run "git" args ctx.timeoutMs (cwd := dir) (env := env)
     unless r.ok do throw (IO.userError (r.describe what))
     return r.stdout
   try
@@ -227,7 +227,7 @@ private def unpack (ctx : Context) (archive : ByteArray) (dest : FilePath) : IO 
   let file := dest.withExtension "tar.gz"
   IO.FS.writeBinFile file archive
   IO.FS.createDirAll dest
-  let r ← Process.run "tar" #["-xzf", file.toString, "-C", dest.toString, "--strip-components=1"]
+  let r ← System.Process.run "tar" #["-xzf", file.toString, "-C", dest.toString, "--strip-components=1"]
     ctx.timeoutMs
   IO.FS.removeFile file
   unless r.ok do throw (IO.userError (r.describe "tar"))
@@ -247,7 +247,7 @@ private def initFromArchive (ctx : Context) (dir : FilePath) (head : String) : I
 /-- Clone the branch with `git`. -/
 private def openGit (ctx : Context) (src : Source) (dir : FilePath) : IO State := do
   let filter := if src.repo.host == .local then #[] else #["--filter=blob:none"]
-  let r ← Process.run "git" (#["clone", "--quiet", "--single-branch", "--branch", src.branch] ++ filter ++
+  let r ← System.Process.run "git" (#["clone", "--quiet", "--single-branch", "--branch", src.branch] ++ filter ++
     #["--", src.repo.cloneUrl, dir.toString]) ctx.timeoutMs (env := Process.hermeticGit)
   unless r.ok do throw (IO.userError (r.describe s!"cloning {src.repo.cloneUrl} (branch {src.branch})"))
   excludeBuildOutputs dir
@@ -321,7 +321,7 @@ private def publishGitHub (ctx : Context) (creds : Liaison.Credentials) (src : S
   for ch in cs do
     if ch.status == 'D' then entries := entries.push (githubTreeEntry ch none)
     else
-      let bytes ← Process.runBytes "git" #["cat-file", "blob", ch.blob] ctx.timeoutMs (cwd := dir)
+      let bytes ← System.Process.runBytes "git" #["cat-file", "blob", ch.blob] ctx.timeoutMs (cwd := dir)
         (env := Process.hermeticGit)
       let b ← call "POST" s!"{base}/git/blobs"
         (some (Json.mkObj [("content", Data.Base64.encode bytes), ("encoding", "base64")]))
@@ -363,7 +363,7 @@ private def publishGitLab (ctx : Context) (creds : Liaison.Credentials) (src : S
   let mut actions : Array Json := #[]
   for ch in cs do
     let content ← if ch.status == 'D' then pure none else
-      some <$> Data.Base64.encode <$> Process.runBytes "git" #["cat-file", "blob", ch.blob] ctx.timeoutMs
+      some <$> Data.Base64.encode <$> System.Process.runBytes "git" #["cat-file", "blob", ch.blob] ctx.timeoutMs
         (cwd := dir) (env := Process.hermeticGit)
     actions := actions.push (← IO.ofExcept (gitlabAction ch content |>.mapError IO.userError))
   let k ← via ctx creds "POST" s!"{base}/repository/commits"
@@ -408,6 +408,6 @@ def seedCache (cache : Option FilePath) (project : FilePath) (timeoutMs : Nat) :
   let dest := project / ".lake" / "packages" / "linen"
   unless (← cached.pathExists) && !(← dest.pathExists) do return
   IO.FS.createDirAll (project / ".lake" / "packages")
-  let _ ← Process.run "cp" #["-R", cached.toString, dest.toString] timeoutMs
+  let _ ← System.Process.run "cp" #["-R", cached.toString, dest.toString] timeoutMs
 
 end Lode.Workspace

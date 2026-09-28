@@ -10,10 +10,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      # linen's native build dependencies (it builds its FFI as a dependency).
-      - run: sudo apt-get update && sudo apt-get install -y libpq-dev libssl-dev pkg-config unzip zlib1g-dev libsecret-1-dev jq
+      # linen's native build dependencies (it builds its FFI as a dependency),
+      # from linen's own list at the version lode requires.
+      - uses: typednotes/linen/.github/actions/setup-native-deps@v1.7.0
+        with:
+          keyring: false
+      - run: sudo apt-get install -y jq
       - uses: leanprover/lean-action@v1
-      - run: lake build LodeTests
+        with:
+          test: false
+      - run: lake test
       # A real agent loop over a real repository, with a scripted model.
       - run: test/e2e.sh
       # The GitHub/GitLab and model paths, against a mock liaison.
@@ -31,14 +37,17 @@ jobs:
       - uses: actions/checkout@v5
         with:
           repository: typednotes/lun
-          ref: ${{ vars.LUN_E2E_REF || 'v0.2.0' }}
+          ref: ${{ vars.LUN_E2E_REF || 'v0.2.2' }}
           path: lun
       - uses: actions/checkout@v5
         with:
           repository: typednotes/linen
-          ref: ${{ vars.LINEN_E2E_REF || 'v1.6.2' }}
+          ref: ${{ vars.LINEN_E2E_REF || 'v1.7.0' }}
           path: linen
-      - run: sudo apt-get update && sudo apt-get install -y libpq-dev libssl-dev pkg-config unzip zlib1g-dev libsecret-1-dev jq
+      - uses: typednotes/linen/.github/actions/setup-native-deps@v1.7.0
+        with:
+          keyring: false
+      - run: sudo apt-get install -y jq
       - run: curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain none
       - run: echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
       - run: lode/test/lun.sh lun linen

@@ -3,7 +3,7 @@
   refused (credentials for the wrong provider or host, a model connection
   speaking another API, local-only features outside local mode).
 -/
-import LodeTests.Util
+import LodeTest.Util
 import Lode.Spec
 
 open Lean (Json)

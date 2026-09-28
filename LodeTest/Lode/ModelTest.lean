@@ -2,7 +2,7 @@
   Tests for `Lode.Model`: the two wire formats, both ways, and configuration
   parsing (what is implied by a provider, what local mode admits).
 -/
-import LodeTests.Util
+import LodeTest.Util
 import Lode.Model
 
 open Lean (Json toJson)

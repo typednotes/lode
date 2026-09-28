@@ -11,9 +11,11 @@ by real git repositories:
   * GitLab (https://gitlab.com/api/v4/projects/acme%2Fdemo/...): branches,
     archive.tar.gz, commits with actions — over GITLAB_REPO;
   * Anthropic (https://api.anthropic.com/v1/messages): replies from the JSON
-    list in MODEL_SCRIPT, in order.
+    list in MODEL_SCRIPT, in order; an entry with `_status` is answered with
+    that status and `_headers` instead (a rate limit, say).
 
-Every egress body is appended to LOG (one JSON object per line). A warrant
+Every egress body is appended to LOG (one JSON object per line, with the
+time it was received as `received`, in seconds). A warrant
 whose expiresAt caveat is before the request's `now` is refused `expired`,
 as liaison refuses it.
 
@@ -26,6 +28,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -168,6 +171,9 @@ def anthropic(method, path, body):
         i = MODEL_STEP[0]
         MODEL_STEP[0] += 1
     reply = script[i] if i < len(script) else {"content": [{"type": "text", "text": "(end)"}]}
+    if "_status" in reply:
+        return answer(reply["_status"], {"type": "error", "error": {"type": "rate_limit_error"}},
+                      reply.get("_headers"))
     reply = dict({"type": "message", "role": "assistant", "stop_reason": "end_turn",
                   "usage": {"input_tokens": 100, "output_tokens": 10}}, **reply)
     return answer(200, reply)
@@ -194,7 +200,7 @@ class Handler(BaseHTTPRequestHandler):
         req = json.loads(self.rfile.read(int(self.headers["content-length"])))
         with LOCK:
             with open(LOG, "a") as f:
-                f.write(json.dumps(req) + "\n")
+                f.write(json.dumps(dict(req, received=time.time())) + "\n")
         for k in ["now", "cost", "provider", "action", "resource", "runId", "orgId"]:
             if not isinstance(req.get(k), str):
                 return self.reply(400, {"error": "malformed_warrant", "field": k})

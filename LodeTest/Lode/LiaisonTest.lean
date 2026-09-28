@@ -5,7 +5,7 @@
   round-trips, and refusals read well. The wire format itself is
   `Liaison.Wire`'s, tested in liaison.
 -/
-import LodeTests.Util
+import LodeTest.Util
 import Lode.Liaison
 
 open Lean (Json toJson)

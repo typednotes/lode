@@ -23,7 +23,7 @@ import Lode.Message
 import Lode.Model
 import Lode.Process
 import Lode.Validate
-import Lode.Diagnostics
+import Linen.System.LakeLog
 import Linen.Control.Monad.Effect.FileSystem
 
 namespace Lode.Tools
@@ -378,8 +378,8 @@ def Env.confine (env : Env) (op : Op) (file : FilePath) (shown : String) : IO (O
     return some s!"'{shown}' may not be written (it leads into .git or .lake)"
   return none
 
-private def git (env : Env) (args : Array String) : IO Process.Result :=
-  Process.run "git" args 60000 (cwd := env.root) (env := Process.hermeticGit) (abort := env.abort)
+private def git (env : Env) (args : Array String) : IO System.Process.Result :=
+  System.Process.run "git" args 60000 (cwd := env.root) (env := Process.hermeticGit) (abort := env.abort)
 
 private def pathspec (comps : List String) : String :=
   if comps.isEmpty then "." else "/".intercalate comps
@@ -391,14 +391,14 @@ private def withCut (text : String) (cut : Bool) (what : String) : String :=
     diagnostics. -/
 def check (env : Env) (targets : Array String) : IO (String × Bool) := do
   env.seed
-  let r ← Process.run "lake" (#["build"] ++ targets) env.checkTimeoutMs (cwd := env.projectDir)
+  let r ← System.Process.run "lake" (#["build"] ++ targets) env.checkTimeoutMs (cwd := env.projectDir)
     (env := Process.toolEnv) (abort := env.abort)
   let log := r.stdout ++ "\n" ++ r.stderr
-  let diags := (Diagnostics.parse log).filter (!Diagnostics.isNoise ·)
+  let diags := (System.LakeLog.parse log).filter (!·.isSummary)
   let errors := diags.filter (·.severity == "error")
   let warnings := diags.filter (·.severity == "warning")
   let shown := (errors ++ warnings).take 60
-  let listing := "\n\n".intercalate (shown.map Diagnostics.Diagnostic.render)
+  let listing := "\n\n".intercalate (shown.map System.LakeLog.Diagnostic.render)
   let more := if errors.length + warnings.length > shown.length then
     s!"\n\n({errors.length + warnings.length - shown.length} more not shown)" else ""
   if r.ok then
@@ -470,7 +470,7 @@ def run (env : Env) : Args → IO (String × Bool)
       IO.FS.writeFile file text'
       return (s!"Replaced {n} occurrence{if n == 1 then "" else "s"} in {env.display comps}.", false)
   | .bash command timeoutSec => do
-    let r ← Process.run "bash" #["-c", command] (timeoutSec * 1000) (cwd := env.projectDir)
+    let r ← System.Process.run "bash" #["-c", command] (timeoutSec * 1000) (cwd := env.projectDir)
       (env := Process.toolEnv) (input := some "") (abort := env.abort)
     let out := (r.stdout ++ (if r.stderr.isEmpty then "" else
       (if r.stdout.isEmpty || r.stdout.endsWith "\n" then "" else "\n") ++ r.stderr)).trimAsciiEnd.toString

@@ -25,6 +25,7 @@ import Lode.Message
 import Lode.Liaison
 import Lode.Http
 import Lode.Validate
+import Linen.Network.HTTP.Client.Retry
 
 namespace Lode.Model
 
@@ -376,51 +377,71 @@ inductive Transport where
   /-- No network (the `scripted` API). -/
   | none
 
-/-- An HTTP status worth retrying: rate limits and server-side failures
-    (Anthropic's `529 overloaded` included). -/
-def retryable (status : Nat) : Bool := status == 408 || status == 429 || status ≥ 500
+/-- How model calls are retried: linen's policy, with delays for a model
+    API — four attempts, backoff from 2 s (jittered), a server's
+    `Retry-After` followed up to a minute. -/
+def retryPolicy : Network.HTTP.Client.RetryPolicy :=
+  { maxAttempts := 4, baseDelayMillis := 2000, maxDelayMillis := 60000 }
 
-/-- A failed call, and whether trying again may help. -/
+/-- An HTTP status worth retrying (linen's default: `408`, `429`, `5xx` —
+    Anthropic's `529 overloaded` included). -/
+def retryable (status : Nat) : Bool := retryPolicy.retryStatus status
+
+/-- A failed call, whether trying again may help, and after how long the
+    server asked to be retried (`Retry-After`, in milliseconds). -/
 structure Failure where
   message : String
   retry : Bool
+  retryAfterMs : Option Nat := none
 
 /-- One attempt: the request body is sent, the answer read. -/
 private def attempt (cfg : Config) (t : Transport) (body : Json) (timeoutMs : Nat) :
     IO (Except Failure Reply) := do
   let path := if cfg.api == .anthropic then "/messages" else "/chat/completions"
   let url := cfg.baseUrl ++ path
-  let answer : Except Failure (Nat × String) ← try
+  let answer : Except Failure (Nat × String × Option Nat) ← try
       match t with
       | .liaison base creds =>
         let u ← Liaison.call base creds
           { method := "POST", url, account := creds.account
             headers := [("content-type", "application/json")], body := some body.compress } timeoutMs
-        pure (.ok (u.status.toNat, Liaison.text u))
+        -- The provider's answer, relayed by liaison with its headers.
+        pure (.ok (u.status.toNat, Liaison.text u,
+          (u.header? "retry-after").bind Network.HTTP.Client.parseRetryAfterMillis))
       | .direct key =>
         let auth := if cfg.api == .anthropic then [("x-api-key", key), ("anthropic-version", "2023-06-01")]
           else [("authorization", s!"Bearer {key}")]
         let a ← Http.request .POST url ([("content-type", "application/json")] ++ auth)
           (some body.compress) timeoutMs
-        pure (.ok (Http.status a, Http.text a))
+        pure (.ok (Http.status a, Http.text a, Network.HTTP.Client.retryAfterMillis a))
       | .none => pure (.error { message := "no transport for this model", retry := false })
     catch e => pure (.error { message := toString e, retry := !(toString e).startsWith "liaison refused" })
   match answer with
   | .error f => return .error f
-  | .ok (status, text) =>
+  | .ok (status, text, retryAfterMs) =>
     if status != 200 then
       let snippet := if text.length > 1000 then (text.take 1000).toString ++ "…" else text
-      return .error { message := s!"the model API answered {status}: {snippet}", retry := retryable status }
+      return .error { message := s!"the model API answered {status}: {snippet}", retry := retryable status,
+                      retryAfterMs }
     match Json.parse text with
     | .error e => return .error { message := s!"the model's answer is not JSON: {e}", retry := true }
     | .ok j =>
       let r := if cfg.api == .anthropic then anthropicReply j else openaiReply j
       return r.mapError fun m => { message := m, retry := false }
 
+/-- Sleep `ms` milliseconds in short slices, returning early (with `true`)
+    once `abort` is set. -/
+private def sleepUnlessAborted (ms : Nat) (abort : IO.Ref Bool) : IO Bool := do
+  for _ in [0:(ms + 199) / 200] do
+    if ← abort.get then return true
+    IO.sleep 200
+  abort.get
+
 /-- Ask the model for its next message. `step` counts the assistant messages
     of the session so far (the `scripted` API plays `script[step]`). Retries
-    a transient failure up to three times, backing off, unless `abort` is
-    set. -/
+    a transient failure per `retryPolicy` — the server's `Retry-After` when it
+    gives one, else jittered backoff (linen's `delayFor`) — and stops waiting
+    as soon as `abort` is set. -/
 def complete (cfg : Config) (t : Transport) (system : String) (tools : Array ToolSpec)
     (msgs : Array Message) (step : Nat) (timeoutMs : Nat) (abort : IO.Ref Bool) : IO Reply := do
   if cfg.api == .scripted then
@@ -428,15 +449,14 @@ def complete (cfg : Config) (t : Transport) (system : String) (tools : Array Too
   let body := if cfg.api == .anthropic then anthropicRequest cfg system tools msgs
     else openaiRequest cfg system tools msgs
   let mut last := ""
-  for delay in [0, 2000, 8000, 20000] do
-    if delay > 0 then
-      IO.sleep delay.toUInt32
-      if ← abort.get then throw (IO.userError "aborted")
+  for n in [1:retryPolicy.maxAttempts + 1] do
     match ← attempt cfg t body timeoutMs with
     | .ok r => return r
     | .error f =>
       last := f.message
-      unless f.retry do break
+      unless f.retry && n < retryPolicy.maxAttempts do break
+      let delay ← Network.HTTP.Client.delayFor retryPolicy n f.retryAfterMs
+      if ← sleepUnlessAborted delay abort then throw (IO.userError "aborted")
   throw (IO.userError last)
 
 end Lode.Model

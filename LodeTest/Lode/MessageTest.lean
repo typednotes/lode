@@ -3,7 +3,7 @@
   context the model is sent is well formed — every tool call answered, the
   compacted history replaced by its summary.
 -/
-import LodeTests.Util
+import LodeTest.Util
 import Lode.Message
 
 open Lean (Json toJson)
