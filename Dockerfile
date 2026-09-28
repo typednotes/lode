@@ -8,7 +8,7 @@
 # DuckDB archive linen's lakefile downloads, a C/C++ toolchain).
 #
 #   podman build -t lode .
-#   podman build --build-arg LINEN_REF=v1.5.0 -t lode .
+#   podman build --build-arg LINEN_REF=v1.6.1 -t lode .
 #
 # LINEN_REF is the linen version pre-built into the package cache and the
 # one new projects are told to require (LODE_LINEN_REV). A workspace whose
@@ -38,7 +38,7 @@ RUN lake build lode
 
 # ── The package cache: linen, built, at LINEN_REF ────────────────────────────
 FROM base AS cache
-ARG LINEN_REF=v1.5.0
+ARG LINEN_REF=v1.6.1
 WORKDIR /warm
 RUN cp /tmp/lean-toolchain lean-toolchain \
     && printf '%s\n' \
@@ -60,7 +60,7 @@ RUN cp /tmp/lean-toolchain lean-toolchain \
 
 # ── Runtime ──────────────────────────────────────────────────────────────────
 FROM base AS runtime
-ARG LINEN_REF=v1.5.0
+ARG LINEN_REF=v1.6.1
 RUN useradd --system --create-home --uid 10001 lode \
     && mkdir -p /var/lib/lode \
     && chown -R lode /var/lib/lode /opt/elan

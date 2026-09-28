@@ -1,8 +1,8 @@
 # lode — agent notes
 
 `lode` is the coding agent of typednotes: an HTTP service (Lean 4, on
-`linen` pinned `v1.5.0`, speaking to liaison with liaison's own wire module
-`Liaison.Wire`, pinned `v0.5.1`) that runs model-driven sessions over a branch of a
+`linen` pinned `v1.6.1`, speaking to liaison with liaison's own wire module
+`Liaison.Wire`, pinned `v0.5.3`) that runs model-driven sessions over a branch of a
 git repository and writes the Lean projects `lun` builds and serves (cells,
 DAGs, `lun.json`). lode is the writer; lun is the runner — do not confuse
 the two. See `README.md` for the API and the design.
@@ -122,7 +122,7 @@ pushing is always left to the user.
   `run_authority_bounded`. lode forwards warrants as given (it has no root
   key); authority is bounded by what the caller mints, not narrowed further.
 - **The model goes through liaison's generic `provider` egress** (liaison
-  0.5.1's `inference` call kind is still a stub), charged
+  0.5.3's `inference` call kind is still a stub), charged
   the flat `cost` per call (liaison's `inference` kind is a stub): no token
   metering. The request must fit liaison's UTF-8 body; replies are relayed
   whole (no streaming, so progress is visible per step, not per token).
