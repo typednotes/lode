@@ -36,9 +36,13 @@ namespace LodeTests.Tools
 #guard (Args.parse "check" "{\"targets\": [\"--help\"]}").toOption.isNone
 #guard (Args.parse "check" "{\"targets\": [\"a;rm -rf /\"]}").toOption.isNone
 #guard (Args.parse "publish" "{\"message\": \"  \"}").toOption.isNone
-#guard (Args.parse "lun_call" "{\"kind\": \"cell\", \"name\": \"math.double\"}").toOption.isSome
+#guard (Args.parse "lun_call" "{\"kind\": \"function\", \"name\": \"math.double\"}").toOption.isSome
+#guard (Args.parse "lun_call" "{\"kind\": \"graph\", \"name\": \"invoice\"}").toOption.isSome
+-- lun's old kinds are gone.
+#guard (Args.parse "lun_call" "{\"kind\": \"cell\", \"name\": \"math.double\"}").toOption.isNone
+#guard (Args.parse "lun_call" "{\"kind\": \"dag\", \"name\": \"main\"}").toOption.isNone
 #guard (Args.parse "lun_call" "{\"kind\": \"both\", \"name\": \"x\"}").toOption.isNone
-#guard (Args.parse "lun_call" "{\"kind\": \"dag\", \"name\": \"../x\"}").toOption.isNone
+#guard (Args.parse "lun_call" "{\"kind\": \"graph\", \"name\": \"../x\"}").toOption.isNone
 #guard (Args.parse "rm" "{}").toOption.isNone
 
 -- ── read ────────────────────────────────────────────────────────────────────

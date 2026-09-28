@@ -35,8 +35,9 @@ def identComponent (s : String) : Bool :=
   | c :: cs => (c.isAlpha || c == '_') && cs.all fun c => c.isAlphanum || c == '_'
   | [] => false
 
-/-- A lun cell or DAG name: dotted identifiers, e.g. `math.double`. -/
-def cellName (s : String) : Bool := s.length ≤ 128 && (s.splitOn ".").all identComponent
+/-- A lun function or graph name: dotted identifiers, e.g. `math.double`
+    (lun's `Validate.functionName`). -/
+def functionName (s : String) : Bool := s.length ≤ 128 && (s.splitOn ".").all identComponent
 
 -- ── Git ─────────────────────────────────────────────────────────────────────
 

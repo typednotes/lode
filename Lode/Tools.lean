@@ -240,8 +240,8 @@ def Args.parse (name : String) (arguments : String) : Except String Args := do
   | "lun_build" => return .lunBuild
   | "lun_call" =>
     let a : LunCallArgs ← fromJson? j
-    check (a.kind == "cell" || a.kind == "dag") "lun_call.kind: 'cell' or 'dag'"
-    check (Validate.cellName a.name) "lun_call.name: a cell or DAG name (dotted identifiers)"
+    check (a.kind == "function" || a.kind == "graph") "lun_call.kind: 'function' or 'graph'"
+    check (Validate.functionName a.name) "lun_call.name: a function or graph name (dotted identifiers)"
     return .lunCall a.kind a.name (a.body.getD (Json.mkObj []))
   | other => throw s!"there is no tool named '{other}'"
 
@@ -297,12 +297,12 @@ def specs : Array Model.ToolSpec := #[
     description := "Commit every change in the workspace and push it to the shared repository's branch. Returns the new commit. lun builds only published commits."
     schema := object [("message", prop "string" "Commit message")] ["message"] },
   { name := "lun_build"
-    description := "Have lun build the last published commit, with the cells and DAGs declared in lun.json in the project directory. Waits for the build; returns its state, diagnostics (attributed to cells, DAGs or the project), and once ready its cells and DAGs."
+    description := "Have lun build the last published commit, with the functions and graphs declared in lun.json in the project directory. Waits for the build; returns its state, diagnostics (attributed to functions, graphs or the project), and once ready its functions and graphs."
     schema := object [] [] },
   { name := "lun_call"
-    description := "Call a cell or DAG of the latest ready lun build. Cell body: {\"input\": x} (x is the value, an array of values for several arguments, omitted for none) or {\"inputs\": [x1, x2]} for several calls. DAG body: {\"inputs\": {\"name\": value}}."
-    schema := object [("kind", Json.mkObj [("type", "string"), ("enum", toJson #["cell", "dag"])]),
-      ("name", prop "string" "The cell or DAG name"),
+    description := "Call a function, or run a graph once, of the latest ready lun build. Function body: {\"input\": x} (x is the value, an array of values for several arguments, omitted for none) or {\"inputs\": [x1, x2]} for several calls. Graph body: {\"inputs\": {\"name\": value}}."
+    schema := object [("kind", Json.mkObj [("type", "string"), ("enum", toJson #["function", "graph"])]),
+      ("name", prop "string" "The function or graph name"),
       ("body", prop "object" "The request body")] ["kind", "name"] } ]
 
 /-- The tools of an agent, by name. -/

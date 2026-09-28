@@ -9,7 +9,7 @@ linen change and the deletion here (and in lun) happen in the same pass.
 
 ## Broken now (independent of linen)
 
-- [ ] **lode speaks lun's old API.** lun 0.2.0 (`aa24372`) renamed cells →
+- [x] **lode speaks lun's old API.** Done: lode now speaks lun 0.2.0's functions/graphs throughout (the old keys are refused with a hint), and CI pins lun to `v0.2.0`. lun 0.2.0 (`aa24372`) renamed cells →
   functions and DAGs → graphs in routes and fields, with no aliases: lun parses
   `functions`/`graphs` (`lun/Lun/Spec.lean:174-175`) and serves
   `/v0/builds/{id}/functions|graphs/{name}` (`lun/Lun/Server.lean:122-128`).

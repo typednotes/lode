@@ -5,7 +5,7 @@
 <h1 align="center">lode</h1>
 
 <p align="center">
-  <em>A coding agent in Lean 4 that writes typed cells and DAGs for lun, in a repository it shares with you.</em>
+  <em>A coding agent in Lean 4 that writes typed functions and reactive graphs for lun, in a repository it shares with you.</em>
 </p>
 
 <p align="center">
@@ -14,7 +14,7 @@
   <a href="https://github.com/typednotes/lode/pkgs/container/lode"><img src="https://img.shields.io/badge/ghcr.io-typednotes%2Flode-blue?logo=docker" alt="Docker image"></a>
   <a href="https://github.com/typednotes/lode/tags"><img src="https://img.shields.io/github/v/tag/typednotes/lode?label=version&sort=semver" alt="Version"></a>
   <a href="https://lean-lang.org/"><img src="https://img.shields.io/badge/Lean-v4.34.0-blue" alt="Lean v4.34.0"></a>
-  <a href="https://github.com/typednotes/linen"><img src="https://img.shields.io/badge/built%20on-linen%20v1.6.1-c9b896" alt="Built on linen v1.6.1"></a>
+  <a href="https://github.com/typednotes/linen"><img src="https://img.shields.io/badge/built%20on-linen%20v1.6.2-c9b896" alt="Built on linen v1.6.2"></a>
   <a href="https://github.com/typednotes/liaison"><img src="https://img.shields.io/badge/speaks-liaison%20v0.5.3-0e6b6f" alt="Speaks liaison v0.5.3"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License: Apache 2.0"></a>
 </p>
@@ -24,10 +24,10 @@
 `lode` is the coding agent of [typednotes](https://github.com/typednotes/typednotes):
 an HTTP service that runs model-driven sessions over a branch of a git
 repository and writes the Lean 4 projects [`lun`](https://github.com/typednotes/lun)
-builds and serves — modules implementing **cells** (functions with a declared
-signature ending in linen's `Eff`), **DAGs** wiring them, and the `lun.json`
+builds and serves — modules implementing **functions** (each under a declared
+signature ending in linen's `Eff`), **graphs** wiring them, and the `lun.json`
 declaring both. A session is done when lun builds the published commit and the
-cells and DAGs answer as intended.
+functions and graphs answer as intended.
 
 lode holds no third-party credential: it reaches the repository (GitHub,
 GitLab) and the model (Anthropic, Mistral, OpenAI or any OpenAI-compatible
@@ -39,7 +39,7 @@ format (`Liaison.Wire`). It is built on
 ```
  user / typednotes app ──HTTP──▶ lode ──(warrant)──▶ liaison ──▶ GitHub / GitLab              open, publish
                                   │    ──(warrant)──▶ liaison ──▶ Anthropic / Mistral / OpenAI…  the model
-                                  └──────────────────▶ lun  build the published commit, call cells and DAGs
+                                  └──────────────────▶ lun  build the published commit, call functions and graphs
 ```
 
 ## Table of contents
@@ -57,10 +57,10 @@ format (`Liaison.Wire`). It is built on
 
 ## Features
 
-- **Writes for lun** — the system prompt carries lun's contract (cells, the
-  allowed effects, DAGs, `lun.json`), and the tools close the loop: `check`
+- **Writes for lun** — the system prompt carries lun's contract (functions,
+  the allowed effects, graphs, `lun.json`), and the tools close the loop: `check`
   (`lake build` diagnostics), `publish`, `lun_build` (lun's diagnostics,
-  attributed to each cell and DAG), `lun_call`.
+  attributed to each function and graph), `lun_call`.
 - **A shared repository** — one branch of a GitHub or GitLab repository,
   opened and published through liaison (blobs → tree → commit →
   fast-forward on GitHub, a commit with actions on GitLab); never a force
@@ -94,7 +94,7 @@ lake build
 lake build LodeTests          # unit tests (#guard): every parser and pure rule
 test/e2e.sh                   # a real agent loop (scripted model) over a real repository
 test/liaison.sh               # GitHub, GitLab and the model through a mock liaison
-test/lun.sh ../lun ../linen   # with a real lun (>= 39e0b62) and a linen checkout
+test/lun.sh ../lun ../linen   # with a real lun (>= 0.2.0) and a linen checkout
 ```
 
 ### Run
@@ -116,7 +116,7 @@ curl -s -X POST localhost:8080/v0/sessions -H "Authorization: Bearer $LODE_TOKEN
   "source": {"url": "https://github.com/acme/sheets", "branch": "main", "path": "lean",
              "credentials": {"warrant": {…}, "account": "{user_id}/{connection_id}"}},
   "model": {"name": "claude-sonnet-4-5", "credentials": {"warrant": {…}, "account": "…", "cost": 10}},
-  "message": "Write a cell that converts EUR to USD, and a DAG summing two converted amounts."
+  "message": "Write a function that converts EUR to USD, and a graph summing two converted amounts."
 }'
 curl -s "localhost:8080/v0/sessions/$ID/messages?after=0&wait=30" -H "Authorization: Bearer $LODE_TOKEN"
 ```
@@ -135,7 +135,7 @@ POST …/abort                       stop
 In a run, the model typically explores the repository; writes modules;
 `check`s until `lake build` is clean; writes `lun.json`; `publish`es one
 commit on the shared branch; `lun_build`s the published commit and fixes what
-lun reports per cell and DAG; `lun_call`s the result; and ends with a summary
+lun reports per function and graph; `lun_call`s the result; and ends with a summary
 naming the commit, the lun build and the services.
 
 ## Tools
@@ -151,8 +151,8 @@ naming the commit, the lun build and the services.
 | `todo` | the model's task list (visible in the session's status) |
 | `check` | `lake build` (optionally of some targets): its errors and warnings |
 | `publish` | commit every change and push it to the branch |
-| `lun_build` | have lun build the published commit with `lun.json`; wait; report state, diagnostics, cells, DAGs |
-| `lun_call` | call a cell or DAG of the latest ready build |
+| `lun_build` | have lun build the published commit with `lun.json`; wait; report state, diagnostics, functions, graphs |
+| `lun_call` | call a function, or run a graph once, of the latest ready build |
 
 Paths never leave the checkout; `.git` and `.lake` cannot be written. The
 `plan` agent has `read`, `ls`, `grep`, `todo`, `check` and `lun_call`.
@@ -164,9 +164,9 @@ In the project directory, written and published by the model with the code:
 ```json
 {
   "open": ["MyProject"],
-  "cells": [{"name": "double", "module": "MyProject.Math", "function": "MyProject.double",
+  "functions": [{"name": "double", "module": "MyProject.Math", "function": "MyProject.double",
              "signature": "Nat → Eff [] Nat"}],
-  "dags": [{"name": "main", "program": "do\n  let x ← input \"x\" Nat\n  double x"}]
+  "graphs": [{"name": "main", "program": "do\n  let x ← input \"x\" Nat\n  double x"}]
 }
 ```
 
@@ -211,7 +211,7 @@ With `LODE_TOKEN` set, every route but `/_health` needs
   },
   "lun": { "credentials": { … } },             // optional: what lun reads the repository with (default: source's)
   "agent": "build",                            // or "plan"
-  "message": "Write a cell that …"             // optional: start at once
+  "message": "Write a function that …"             // optional: start at once
 }
 ```
 
@@ -243,14 +243,14 @@ isError}]`), `compaction` (`summary`, `firstKept`), `event` (`kind`:
 | `LODE_MAX_STEPS` | `200` | model calls per run |
 | `LODE_MODEL_TIMEOUT` / `LODE_GIT_TIMEOUT` / `LODE_CHECK_TIMEOUT` | `600` / `600` / `1800` | seconds |
 | `LODE_PACKAGE_CACHE` | — | pre-built linen checkouts, `{cache}/linen/{rev}` |
-| `LODE_LINEN_REV` / `LODE_TOOLCHAIN` | `v1.6.1` / `leanprover/lean4:v4.34.0` | what new projects are told to use |
+| `LODE_LINEN_REV` / `LODE_TOOLCHAIN` | `v1.6.2` / `leanprover/lean4:v4.34.0` | what new projects are told to use |
 | `LODE_ALLOW_LOCAL` | — | `1`: `file://` repositories and the `scripted` model. Tests only |
 
 ## Docker
 
 Images are published to `ghcr.io/typednotes/lode` — `edge` from `main`, and
 `latest`, `X.Y.Z` and `X.Y` from release tags. The image carries the Lean
-toolchain and linen (`LINEN_REF`, default `v1.6.1`) pre-built in the package
+toolchain and linen (`LINEN_REF`, default `v1.6.2`) pre-built in the package
 cache, so a workspace locked to that revision does not rebuild linen.
 
 ```sh

@@ -21,7 +21,7 @@
     "lun": { "credentials": { … } },             // optional: the warrant lun reads the repository with
                                                  // (default: the repository's)
     "agent": "build",                            // or "plan"
-    "message": "Write a cell that …"             // optional: starts a run at once
+    "message": "Write a function that …"             // optional: starts a run at once
   }
   ```
 

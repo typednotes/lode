@@ -2,11 +2,13 @@
   Lode.Lun — having lun build and run what lode wrote
 
   lun (`typednotes/lun`) compiles a Lean project at a commit into typed
-  services: one per **cell** (a function under a declared signature ending in
-  linen's `Eff`) and one per **DAG** of cells (a program in linen's
-  `Reactive` monad). lode's product is exactly such a project, so its last
-  steps are lun's: build the published commit, read the diagnostics lun
-  attributes to each cell and DAG, fix, publish again, and call the result.
+  services: one per **function** (a function of the project under a declared
+  signature ending in linen's `Eff`) and one per **graph** of functions (a
+  program in linen's `Reactive` monad). lode's product is exactly such a
+  project, so its last steps are lun's: build the published commit, read the
+  diagnostics lun attributes to each function and graph, fix, publish again,
+  and call the result. The vocabulary is lun's (≥ 0.2.0), which is linen's:
+  functions and graphs.
 
   **`lun.json`.** What to build is part of the project, not of the
   conversation: a `lun.json` in the project directory, which the model
@@ -15,9 +17,9 @@
   ```jsonc
   {
     "open": ["MyProject"],                        // optional
-    "cells": [{ "name": "math.double", "module": "MyProject.Math",
-                "function": "MyProject.Math.double", "signature": "Nat → Eff [] Nat" }],
-    "dags": [{ "name": "main", "program": "do\n  let x ← input \"x\" Nat\n  math.double x" }]
+    "functions": [{ "name": "math.double", "module": "MyProject.Math",
+                    "function": "MyProject.Math.double", "signature": "Nat → Eff [] Nat" }],
+    "graphs": [{ "name": "main", "program": "do\n  let x ← input \"x\" Nat\n  math.double x" }]
   }
   ```
 
@@ -49,19 +51,24 @@ structure Config where
 
 -- ── The request ─────────────────────────────────────────────────────────────
 
-/-- `lun.json`: the cells and DAGs (lun validates each), namespaces to open. -/
+/-- `lun.json`: the functions and graphs (lun validates each), namespaces to
+    open. -/
 structure Manifest where
   «open» : Option (Array String) := none
-  cells : Array Json
-  dags : Option (Array Json) := none
+  functions : Array Json
+  graphs : Option (Array Json) := none
   deriving ToJson, FromJson
 
 /-- Read `lun.json`. Only the shape is checked; lun checks the rest and its
     errors go back to the model. -/
 def parseManifest (text : String) : Except String Manifest := do
   let j ← (Json.parse text).mapError ("lun.json is not valid JSON: " ++ ·)
+  -- lun has no aliases for its old vocabulary; say what the key is now.
+  for (old, new) in [("cells", "functions"), ("dags", "graphs")] do
+    if (j.getObjVal? old).isOk then
+      throw s!"lun.json: \"{old}\" is now \"{new}\" (lun ≥ 0.2.0 has functions and graphs)"
   let m : Manifest ← (fromJson? j).mapError ("lun.json: " ++ ·)
-  unless !m.cells.isEmpty do throw "lun.json: \"cells\" must list at least one cell"
+  unless !m.functions.isEmpty do throw "lun.json: \"functions\" must list at least one function"
   return m
 
 /-- Credentials as lun reads them. -/
@@ -83,8 +90,8 @@ structure SourceJson where
 structure Request where
   source : SourceJson
   «open» : Option (Array String) := none
-  cells : Array Json
-  dags : Option (Array Json) := none
+  functions : Array Json
+  graphs : Option (Array Json) := none
   deriving ToJson
 
 /-- lun's build request for the published commit. -/
@@ -95,7 +102,7 @@ def buildRequest (src : Workspace.Source) (commit : String) (creds : Option Liai
                 path := if src.path.isEmpty then none else some src.path
                 credentials := creds.map fun c =>
                   { warrant := Liaison.warrantJson c.warrant, account := c.account } }
-    «open» := m.open, cells := m.cells, dags := m.dags } : Request)
+    «open» := m.open, functions := m.functions, graphs := m.graphs } : Request)
 
 -- ── lun's answers ───────────────────────────────────────────────────────────
 
@@ -111,7 +118,7 @@ structure Diagnostic where
   hint : Option String := none
   deriving FromJson
 
-/-- Something with a name (a cell or a DAG of a ready build). -/
+/-- Something with a name (a function or a graph of a ready build). -/
 structure Named where
   name : String
   deriving FromJson
@@ -122,9 +129,10 @@ structure Status where
   state : String
   error : Option String := none
   diagnostics : Option (Array Diagnostic) := none
-  cells : Option (Array Named) := none
-  /-- Each DAG's structure (nodes, sources, sinks), shown to the model as is. -/
-  dags : Option (Array Json) := none
+  functions : Option (Array Named) := none
+  /-- Each graph's structure (inputs, nodes, sources, sinks), shown to the
+      model as is. -/
+  graphs : Option (Array Json) := none
   deriving FromJson
 
 /-- A build's state is final. -/
@@ -181,8 +189,8 @@ def build (cfg : Config) (request : Json) (abort : IO.Ref Bool) : IO Status := d
     s ← status cfg s.id
   return s
 
-/-- Call a cell (`kind = "cell"`) or DAG of a ready build; returns lun's HTTP
-    status and answer. -/
+/-- Call a function (`kind = "function"`) or run a graph (`kind = "graph"`)
+    of a ready build; returns lun's HTTP status and answer. -/
 def call (cfg : Config) (id kind name : String) (body : Json) : IO (Nat × String) := do
   let a ← Http.request .POST s!"{base cfg}/v0/builds/{id}/{kind}s/{name}" (headers cfg)
     (some body.compress) cfg.callTimeoutMs
@@ -191,7 +199,7 @@ def call (cfg : Config) (id kind name : String) (body : Json) : IO (Nat × Strin
 -- ── For the model ───────────────────────────────────────────────────────────
 
 /-- A diagnostic as the model reads it:
-    `[cell math.double] File.lean:3:4: error: …`. -/
+    `[function math.double] File.lean:3:4: error: …`. -/
 def renderDiagnostic (d : Diagnostic) : String :=
   let scope := match d.scope, d.name with
     | some sc, some nm => s!"[{sc} {nm}] "
@@ -213,11 +221,11 @@ def renderStatus (s : Status) : String :=
   let err := match s.error with | some e => s!"\nerror: {e}" | none => ""
   let ds := if diags.isEmpty then "" else
     s!"\n\n{diags.size} diagnostic(s):\n" ++ "\n\n".intercalate (diags.toList.take 60 |>.map renderDiagnostic)
-  let dags := s.dags.getD #[]
+  let graphs := s.graphs.getD #[]
   let ready := if s.state == "ready" then
-    s!"\n\ncells: {names s.cells}\ndags: {", ".intercalate (dags.toList.filterMap fun d =>
-      (d.getObjValAs? String "name").toOption)}" ++
-      (if dags.isEmpty then "" else s!"\ndag structure: {(Json.arr dags).compress}")
+    s!"\n\nfunctions: {names s.functions}\ngraphs: {", ".intercalate (graphs.toList.filterMap fun g =>
+      (g.getObjValAs? String "name").toOption)}" ++
+      (if graphs.isEmpty then "" else s!"\ngraph structure: {(Json.arr graphs).compress}")
     else ""
   head ++ err ++ ds ++ ready
 

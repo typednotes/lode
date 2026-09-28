@@ -1,10 +1,11 @@
 # lode — agent notes
 
 `lode` is the coding agent of typednotes: an HTTP service (Lean 4, on
-`linen` pinned `v1.6.1`, speaking to liaison with liaison's own wire module
+`linen` pinned `v1.6.2`, speaking to liaison with liaison's own wire module
 `Liaison.Wire`, pinned `v0.5.3`) that runs model-driven sessions over a branch of a
-git repository and writes the Lean projects `lun` builds and serves (cells,
-DAGs, `lun.json`). lode is the writer; lun is the runner — do not confuse
+git repository and writes the Lean projects `lun` builds and serves
+(functions, graphs, `lun.json`; lun's and linen's vocabulary — lun ≥ 0.2.0
+has no `cells`/`dags` aliases, and neither has lode). lode is the writer; lun is the runner — do not confuse
 the two. See `README.md` for the API and the design.
 
 ## Layout
@@ -34,7 +35,7 @@ Pure modules (unit-tested with `#guard` in `LodeTests/`):
 - `Lode/Compaction.lean` — when to compact, where to cut (before an
   assistant entry), the summarizer's transcript and instructions.
 - `Lode/Prompt.lean` — agents (`build`, `plan`), the system prompt (lun's
-  contract: cells, effects, DAGs, `lun.json`, the workflow), context files.
+  contract: functions, effects, graphs, `lun.json`, the workflow), context files.
 - `Lode/Spec.lean` — the session request (`SessionSpec.parse`) and
   `CredentialSet` (in memory only).
 - `Lode/Lun.lean` — `lun.json`, the build request, the lun client
@@ -63,7 +64,7 @@ IO modules:
 lake build LodeTests          # unit tests
 test/e2e.sh                   # scripted model, file:// repository, real git/lake
 test/liaison.sh               # GitHub/GitLab/Anthropic through test/mock_liaison.py
-test/lun.sh ../lun ../linen   # with a real lun (>= 39e0b62) and a linen checkout
+test/lun.sh ../lun ../linen   # with a real lun (>= 0.2.0) and a linen checkout
 ```
 
 `LODE_E2E_KEEP=1` keeps a test's work directory. The first build copies
@@ -158,12 +159,13 @@ pushing is always left to the user.
 - **Compaction** estimates tokens (provider usage when reported, else
   characters / 4) and summarizes with the session's own model; it has only
   been exercised through its pure parts and the scripted model.
-- **lun's DAG sessions are not used.** lun's working tree is adding
-  incremental DAG sessions (`POST …/dags/{name}/sessions`); lode targets lun's
-  committed API (builds, cells, one-shot DAG calls) and was verified against
-  lun `39e0b62` (linen v1.5.0, DAGs on the released `Control.Reactive`).
-- **DAGs are inputs and cells only**, because lun refuses linen's other
+- **lun's live graph sessions are not used.** lun 0.2.0 serves graph
+  sessions (`POST …/graphs/{name}/sessions`, then `POST /v0/sessions/{id}`
+  updates some inputs and answers what changed); lode uses builds, function
+  calls and one-shot graph runs only. Verified against lun `fe6af51`
+  (0.2.0 + 3).
+- **Graphs are inputs and functions only**, because lun refuses linen's other
   reactive operators (`map`, `scan`, `combineLatest` with a lambda, …) in a
-  DAG; the prompt says so and asks for that logic to go into cells.
+  graph; the prompt says so and asks for that logic to go into functions.
 - **The container image has not been built here**; the Linux link is
   unverified (lode's own link was verified on macOS).

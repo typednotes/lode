@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # End-to-end test of lode with a real lun: `lun_build` builds the published
-# commit with the cells and DAGs of its `lun.json` (and reports lun's
-# diagnostics when a declared signature is wrong), `lun_call` calls a cell
-# and a DAG of the ready build.
+# commit with the functions and graphs of its `lun.json` (and reports lun's
+# diagnostics when a declared signature is wrong), `lun_call` calls a
+# function and runs a graph of the ready build.
 #
 #   test/lun.sh [LUN_DIR] [LINEN_DIR]
 #
-# LUN_DIR is a lun checkout (default ../lun; >= 39e0b62, whose DAGs are on
+# LUN_DIR is a lun checkout (default ../lun; >= 0.2.0, whose graphs are on
 # linen's released `Control.Reactive`) and LINEN_DIR a linen checkout
 # (default ../linen, >= 1.3.0) the test project depends on by path.
 # Both lode and lun run in local mode (file:// repository, a path dependency on
@@ -65,10 +65,10 @@ end Demo
 LEAN
 lun_json() { # SIGNATURE-OF-DOUBLE
   jq -n --arg sig "$1" '{open: ["Demo"],
-    cells: [{name: "double", module: "Demo.Math", function: "Demo.double", signature: $sig},
+    functions: [{name: "double", module: "Demo.Math", function: "Demo.double", signature: $sig},
             {name: "add", module: "Demo.Math", function: "Demo.add", signature: "Nat → Nat → Eff [Trace.Trace] Nat"},
             {name: "seed", module: "Demo.Math", function: "Demo.seed", signature: "Unit → Eff [] Nat"}],
-    dags: [{name: "main", program: "do\n  let x ← input \"x\" Nat\n  let s ← seed\n  let d ← double x\n  add d s"}]}'
+    graphs: [{name: "main", program: "do\n  let x ← input \"x\" Nat\n  let s ← seed\n  let d ← double x\n  add d s"}]}'
 }
 lun_json "String → Eff [] Nat" > "$seed/lean/lun.json"   # wrong on purpose: lode fixes it
 (cd "$seed/lean" && lake update >/dev/null 2>&1)
@@ -106,9 +106,9 @@ script="$(jq -n --arg good "$good" '[
   {calls: [{name: "write", arguments: {path: "lun.json", content: $good}},
            {name: "publish", arguments: {message: "Fix the signature of double"}}]},
   {calls: [{name: "lun_build", arguments: {}}]},
-  {calls: [{name: "lun_call", arguments: {kind: "cell", name: "double", body: {input: 21}}},
-           {name: "lun_call", arguments: {kind: "cell", name: "add", body: {input: [1, 2]}}},
-           {name: "lun_call", arguments: {kind: "dag", name: "main", body: {inputs: {x: 5}}}}]},
+  {calls: [{name: "lun_call", arguments: {kind: "function", name: "double", body: {input: 21}}},
+           {name: "lun_call", arguments: {kind: "function", name: "add", body: {input: [1, 2]}}},
+           {name: "lun_call", arguments: {kind: "graph", name: "main", body: {inputs: {x: 5}}}}]},
   {text: "done"}]')"
 r="$(api POST /v0/sessions "$(jq -n --arg url "file://$work/remote.git" --argjson script "$script" \
   '{source: {url: $url, branch: "main", path: "lean"}, model: {api: "scripted", script: $script}, message: "Build it."}')")"
@@ -123,17 +123,17 @@ done
 r="$(api GET "/v0/sessions/$id/messages")"
 log="${r#* }"
 results="$(jq -c '[.entries[] | select(.type == "tool_results") | .results[]]' <<<"$log")"
-jq -e '.[0] | .isError == true and (.content | test(": failed")) and (.content | test("\\[cell double\\]"))' <<<"$results" >/dev/null \
-  || fail "the wrong signature is reported on the cell: $(jq -r '.[0].content' <<<"$results")"
-pass "lun_build reports lun's diagnostics, attributed to the cell"
+jq -e '.[0] | .isError == true and (.content | test(": failed")) and (.content | test("\\[function double\\]"))' <<<"$results" >/dev/null \
+  || fail "the wrong signature is reported on the function: $(jq -r '.[0].content' <<<"$results")"
+pass "lun_build reports lun's diagnostics, attributed to the function"
 jq -e '.[2] | .isError == false and (.content | test("Published"))' <<<"$results" >/dev/null || fail "publish: $(jq -c '.[2]' <<<"$results")"
-jq -e '.[3] | (.content | test(": ready")) and (.content | test("cells: double, add, seed"))' <<<"$results" >/dev/null \
+jq -e '.[3] | (.content | test(": ready")) and (.content | test("functions: double, add, seed"))' <<<"$results" >/dev/null \
   || fail "the fixed build is ready: $(jq -r '.[3].content' <<<"$results")"
 pass "after a fix and a publish, the build is ready"
 jq -e '.[4].content | fromjson | .output == 42' <<<"$results" >/dev/null || fail "double: $(jq -c '.[4]' <<<"$results")"
 jq -e '.[5].content | fromjson | .output == 3 and (.log | test("adding 1 and 2"))' <<<"$results" >/dev/null || fail "add: $(jq -c '.[5]' <<<"$results")"
-jq -e '.[6].content | fromjson | .nodes[-1].output == 20' <<<"$results" >/dev/null || fail "the DAG: $(jq -c '.[6]' <<<"$results")"
-pass "lun_call calls cells and the DAG"
+jq -e '.[6].content | fromjson | .nodes[-1].output == 20' <<<"$results" >/dev/null || fail "the graph: $(jq -c '.[6]' <<<"$results")"
+pass "lun_call calls functions and runs the graph"
 r="$(api GET "/v0/sessions/$id")"
 jq -e '(.lastBuild | length) == 64' <<<"${r#* }" >/dev/null || fail "the status names the build"
 pass "the session records the build"
