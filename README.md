@@ -14,7 +14,7 @@
   <a href="https://github.com/typednotes/lode/pkgs/container/lode"><img src="https://img.shields.io/badge/ghcr.io-typednotes%2Flode-blue?logo=docker" alt="Docker image"></a>
   <a href="https://github.com/typednotes/lode/tags"><img src="https://img.shields.io/github/v/tag/typednotes/lode?label=version&sort=semver" alt="Version"></a>
   <a href="https://lean-lang.org/"><img src="https://img.shields.io/badge/Lean-v4.34.0-blue" alt="Lean v4.34.0"></a>
-  <a href="https://github.com/typednotes/linen"><img src="https://img.shields.io/badge/built%20on-linen%20v1.9.0-c9b896" alt="Built on linen v1.9.0"></a>
+  <a href="https://github.com/typednotes/linen"><img src="https://img.shields.io/badge/built%20on-linen%20v1.9.1-c9b896" alt="Built on linen v1.9.1"></a>
   <a href="https://github.com/typednotes/liaison"><img src="https://img.shields.io/badge/speaks-liaison%20v0.5.5-0e6b6f" alt="Speaks liaison v0.5.5"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License: Apache 2.0"></a>
 </p>
@@ -243,14 +243,14 @@ isError}]`), `compaction` (`summary`, `firstKept`), `event` (`kind`:
 | `LODE_MAX_STEPS` | `200` | model calls per run |
 | `LODE_MODEL_TIMEOUT` / `LODE_GIT_TIMEOUT` / `LODE_CHECK_TIMEOUT` | `600` / `600` / `1800` | seconds |
 | `LODE_PACKAGE_CACHE` | — | pre-built linen checkouts, `{cache}/linen/{rev}` |
-| `LODE_LINEN_REV` / `LODE_TOOLCHAIN` | `v1.9.0` / `leanprover/lean4:v4.34.0` | what new projects are told to use |
+| `LODE_LINEN_REV` / `LODE_TOOLCHAIN` | `v1.9.1` / `leanprover/lean4:v4.34.0` | what new projects are told to use |
 | `LODE_ALLOW_LOCAL` | — | `1`: `file://` repositories and the `scripted` model. Tests only |
 
 ## Docker
 
 Images are published to `ghcr.io/typednotes/lode` — `edge` from `main`, and
 `latest`, `X.Y.Z` and `X.Y` from release tags. The image carries the Lean
-toolchain and linen (`LINEN_REF`, default `v1.9.0`) pre-built in the package
+toolchain and linen (`LINEN_REF`, default `v1.9.1`) pre-built in the package
 cache, so a workspace locked to that revision does not rebuild linen.
 
 Pick the tag that matches your lun: `0.1.x` speaks lun < 0.2.0 (cells and
