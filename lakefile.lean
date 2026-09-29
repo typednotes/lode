@@ -5,7 +5,7 @@ open System Lake DSL
 -- SHA-256) but none of its pkg-config libraries (no Postgres), so, like
 -- `lun`, it needs no extra link arguments.
 
-require linen from git "https://github.com/typednotes/linen" @ "v1.9.1"
+require linen from git "https://github.com/typednotes/linen" @ "v1.9.2"
 
 -- For `Liaison.Wire` only: liaison's wire format (`POST /v0/egress`), the
 -- module liaison's own server parses with. It is pure and imports none of
@@ -14,7 +14,7 @@ require linen from git "https://github.com/typednotes/linen" @ "v1.9.1"
 require liaison from git "https://github.com/typednotes/liaison" @ "v0.5.5"
 
 package lode where
-  version := v!"0.2.2"
+  version := v!"0.2.3"
   testDriver := "LodeTest"
 
 @[default_target]

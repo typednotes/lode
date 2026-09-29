@@ -1,7 +1,7 @@
 # lode — agent notes
 
 `lode` is the coding agent of typednotes: an HTTP service (Lean 4, on
-`linen` pinned `v1.9.1`, speaking to liaison with liaison's own wire module
+`linen` pinned `v1.9.2`, speaking to liaison with liaison's own wire module
 `Liaison.Wire`, pinned `v0.5.5`) that runs model-driven sessions over a branch of a
 git repository and writes the Lean projects `lun` builds and serves
 (functions, graphs, `lun.json`; lun's and linen's vocabulary — lun ≥ 0.2.0
