@@ -60,7 +60,7 @@ def main : IO Unit := do
       gitTimeoutMs := ← secondsEnv "LODE_GIT_TIMEOUT" 600
       checkTimeoutMs := ← secondsEnv "LODE_CHECK_TIMEOUT" 1800
       packageCache := (← env? "LODE_PACKAGE_CACHE").map System.FilePath.mk
-      linenRev := (← env? "LODE_LINEN_REV").getD "v1.7.0"
+      linenRev := (← env? "LODE_LINEN_REV").getD "v1.9.0"
       toolchain := (← env? "LODE_TOOLCHAIN").getD "leanprover/lean4:v4.34.0" }
   let registry ← Lode.Registry.new cfg
   if allowLocal then IO.eprintln "lode: LOCAL MODE — file:// repositories and the scripted model accepted"
