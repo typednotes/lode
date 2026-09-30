@@ -29,6 +29,10 @@ structure ToolCall where
   id : String
   name : String
   arguments : String
+  /-- Opaque provider replay metadata (e.g. Gemini function-call signatures). -/
+  signature : Option String := none
+  /-- Provider correlation id, when its native protocol requires one. -/
+  nativeId : Option String := none
   deriving DecidableEq, Repr, Inhabited, ToJson, FromJson
 
 /-- What a tool answered. -/
@@ -37,6 +41,7 @@ structure ToolResult where
   name : String
   content : String
   isError : Bool := false
+  nativeId : Option String := none
   deriving DecidableEq, Repr, Inhabited, ToJson, FromJson
 
 /-- Token counts, as the provider reports them. -/
@@ -52,9 +57,17 @@ instance : Add Usage where
                cacheRead := a.cacheRead + b.cacheRead, cacheWrite := a.cacheWrite + b.cacheWrite }
 
 /-- One message of the conversation. -/
+structure NativeReplay where
+  api : String
+  /-- Original native blocks/items in order; JSON text avoids float conversion
+      and keeps opaque reasoning/signatures byte-for-byte. -/
+  items : Array String
+  deriving DecidableEq, Repr, Inhabited, ToJson, FromJson
+
 inductive Message where
   | user (text : String)
   | assistant (text : String) (calls : Array ToolCall)
+  | assistantReplay (text : String) (calls : Array ToolCall) (replay : NativeReplay)
   | toolResults (results : Array ToolResult)
   deriving DecidableEq, Repr, Inhabited
 
@@ -65,6 +78,7 @@ structure Reply where
   usage : Usage := {}
   /-- The provider's stop reason (`end_turn`, `tool_use`, `stop`, `length`, …). -/
   stop : String := ""
+  replay : Option NativeReplay := none
   deriving DecidableEq, Repr, Inhabited, ToJson, FromJson
 
 -- ── The log ─────────────────────────────────────────────────────────────────
@@ -140,7 +154,9 @@ def Entry.ofJson (j : Json) : Except String Entry := do
 /-- The message an entry carries, if it is part of the conversation. -/
 def Entry.message? : Entry → Option Message
   | .user text _ => some (.user text)
-  | .assistant r _ _ => some (.assistant r.text r.calls)
+  | .assistant r _ _ => some (match r.replay with
+      | some replay => .assistantReplay r.text r.calls replay
+      | none => .assistant r.text r.calls)
   | .toolResults rs _ => some (.toolResults rs)
   | _ => none
 
@@ -161,7 +177,8 @@ def summaryMessage (summary : String) : String :=
     provider refuses a tool call that is not followed by its result. -/
 def answerDangling (msgs : List Message) : List Message :=
   let interrupted (c : ToolCall) : ToolResult :=
-    { id := c.id, name := c.name, content := "(interrupted: this tool call did not complete)", isError := true }
+    { id := c.id, name := c.name, content := "(interrupted: this tool call did not complete)", isError := true,
+      nativeId := c.nativeId }
   let rec go : List Message → List Message
     | [] => []
     | .assistant text calls :: .toolResults rs :: rest =>
@@ -173,6 +190,15 @@ def answerDangling (msgs : List Message) : List Message :=
     | .assistant text calls :: rest =>
       if calls.isEmpty then .assistant text calls :: go rest
       else .assistant text calls :: .toolResults (calls.map interrupted) :: go rest
+    | m@(.assistantReplay _ calls _) :: .toolResults rs :: rest =>
+      if calls.isEmpty then m :: go rest
+      else
+        let missing := calls.filter fun c => !rs.any (·.id == c.id)
+        let known := rs.filter fun r => calls.any (·.id == r.id)
+        m :: .toolResults (known ++ missing.map interrupted) :: go rest
+    | m@(.assistantReplay _ calls _) :: rest =>
+      if calls.isEmpty then m :: go rest
+      else m :: .toolResults (calls.map interrupted) :: go rest
     | .toolResults _ :: rest => go rest  -- results with no call before them
     | m :: rest => m :: go rest
   go msgs
@@ -196,6 +222,8 @@ def context (entries : Array Entry) : Array Message :=
 def Message.chars : Message → Nat
   | .user t => t.length
   | .assistant t cs => t.length + cs.foldl (fun n c => n + c.name.length + c.arguments.length) 0
+  | .assistantReplay t cs replay => t.length + cs.foldl (fun n c => n + c.name.length + c.arguments.length) 0 +
+      replay.items.foldl (fun n item => n + item.length) 0
   | .toolResults rs => rs.foldl (fun n r => n + r.content.length + 32) 0
 
 end Lode

@@ -15,7 +15,8 @@ def warrant (provider : String) : Json :=
   Json.mkObj [("id", "w"), ("orgId", "org"), ("tag", "00"), ("caveats", Json.arr #[
     Json.mkObj [("kind", "runId"), ("value", "run")],
     Json.mkObj [("kind", "resource"), ("value", "conn")],
-    Json.mkObj [("kind", "capability"), ("provider", Json.str provider), ("action", "write")]])]
+    Json.mkObj [("kind", "capability"), ("provider", Json.str provider),
+      ("action", if provider == "github" || provider == "gitlab" then "write" else "inference.generate")]])]
 def creds (provider : String) : Json := Json.mkObj [("warrant", warrant provider), ("account", "user/conn")]
 
 def request (url : String) (model : Json) (extra : List (String × Json) := []) : Json :=
@@ -65,5 +66,17 @@ def claude : Json := Json.mkObj [("name", "claude"), ("credentials", creds "anth
 #guard match SessionSpec.parse (Json.mkObj [("source", Json.mkObj [("url", (1 : Nat))])]) none true with
   | .error e => (e.splitOn "url").length > 1
   | .ok _ => false
+
+def parsedCreds (provider : String) (org := "org") (account := "user/conn") : Option Liaison.Credentials :=
+  (Liaison.Credentials.parse ((creds provider).setObjVal! "warrant" ((warrant provider).setObjVal! "orgId" (Json.str org))
+    |>.setObjVal! "account" (Json.str account)) "test" Model.providers).toOption
+def modelConfig : Model.Config := { api := .anthropic, name := "claude", baseUrl := "https://api.anthropic.com/v1" }
+def bindings := CredentialBindings.ofCredentials { model := parsedCreds "anthropic" }
+#guard (bindings.check modelConfig { model := parsedCreds "anthropic" }).toOption.isSome
+#guard (bindings.check modelConfig { model := parsedCreds "anthropic" "other-org" }).toOption.isNone
+#guard (bindings.check modelConfig { model := parsedCreds "anthropic" "org" "other-user/conn" }).toOption.isNone
+#guard (bindings.check modelConfig { model := parsedCreds "mistral" }).toOption.isNone
+#guard (SessionSpec.parse (request "https://github.com/o/r"
+  (claude.setObjVal! "credentials" ((creds "anthropic").setObjVal! "warrant" ((warrant "anthropic").setObjVal! "orgId" "other")))) none false).toOption.isNone
 
 end LodeTests.Spec

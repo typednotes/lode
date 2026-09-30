@@ -11,6 +11,14 @@ open Lode.Workspace
 
 namespace LodeTests.Workspace
 
+def nativeEntry (path mode : String) := Json.mkObj [("path", Json.str path), ("mode", Json.str mode)]
+#guard (NativeFile.ofJson (nativeEntry "src/Main.lean" "100644")).toOption.isSome
+#guard (NativeFile.ofJson (nativeEntry "bin/run" "100755")).toOption.isSome
+#guard ["../outside", "src/../outside", "/outside", "a%2Fb", ".git/config", ".GIT/config", ".LaKe/cache"].all
+  (fun path => (NativeFile.ofJson (nativeEntry path "100644")).toOption.isNone)
+#guard (NativeFile.ofJson (nativeEntry "link" "120000")).toOption.isNone
+#guard (NativeFile.ofJson (nativeEntry "submodule" "160000")).toOption.isNone
+
 def raw : String :=
   ":000000 100644 0000000 1111111 A\x00lean/New.lean\x00" ++
   ":100644 100755 2222222 3333333 M\x00run.sh\x00" ++

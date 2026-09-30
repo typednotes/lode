@@ -23,6 +23,7 @@ import Lode.Message
 import Lode.Model
 import Lode.Process
 import Lode.Validate
+import Lode.ToolPolicy
 import Linen.System.LakeLog
 import Linen.Control.Monad.Effect.FileSystem
 
@@ -171,6 +172,30 @@ structure LunCallArgs where
   body : Option Json := none
   deriving FromJson
 
+/-- A writer may supply runtime input data, never execution ceilings, bindings,
+    connector grants or credentials. There is no arbitrary request-body case. -/
+inductive RuntimeInput where
+  | function (input : Option Json)
+  | batch (inputs : Array Json)
+  | graph (inputs : Option Json)
+
+def RuntimeInput.kind : RuntimeInput → String
+  | .graph _ => "graph" | _ => "function"
+
+def RuntimeInput.field : RuntimeInput → String
+  | .function _ => "input" | _ => "inputs"
+
+def RuntimeInput.value : RuntimeInput → Option Json
+  | .function input | .graph input => input
+  | .batch inputs => some (Json.arr inputs)
+
+/-- Only a fixed input field can be emitted at the protocol's top level. -/
+def RuntimeInput.body (input : RuntimeInput) : Json :=
+  Json.mkObj ((input.value.map (fun value => [(input.field, value)])).getD [])
+
+theorem RuntimeInput.input_only (input : RuntimeInput) : input.field ∈ ["input", "inputs"] := by
+  cases input <;> simp [RuntimeInput.field]
+
 /-- A tool call's arguments, parsed and checked. -/
 inductive Args where
   | read (path : String) (offset limit : Nat)
@@ -183,7 +208,32 @@ inductive Args where
   | check (targets : Array String)
   | publish (message : String)
   | lunBuild
-  | lunCall (kind name : String) (body : Json)
+  | lunCall (name : String) (input : RuntimeInput)
+
+/-- The operation is derived from the arguments actually executed. -/
+def Args.operation : Args → Operation
+  | .read .. => .read | .ls .. => .ls | .grep .. => .grep
+  | .write .. => .write | .edit .. => .edit | .bash .. => .bash
+  | .todo .. => .todo | .check .. => .check | .publish .. => .publish
+  | .lunBuild => .lunBuild | .lunCall .. => .lunCall
+
+/-- Execution consumes evidence for both the launch/session ceiling and the
+    selected agent. A checked name cannot be swapped for unrelated arguments. -/
+structure AuthorizedArgs (policy : Policy) (agent : List String) where
+  args : Args
+  policyAllows : policy.permits args.operation
+  agentAllows : args.operation.name ∈ agent
+
+def AuthorizedArgs.check (policy : Policy) (agent : List String) (args : Args) :
+    Except String (AuthorizedArgs policy agent) :=
+  if hp : policy.permits args.operation then
+    if ha : args.operation.name ∈ agent then .ok ⟨args, hp, ha⟩
+    else .error s!"the tool '{args.operation.name}' is not available to this agent"
+  else .error s!"the tool '{args.operation.name}' is denied by the session tool policy"
+
+theorem AuthorizedArgs.authority_bounded (bounded : BoundedPolicy ceiling)
+    (a : AuthorizedArgs bounded.policy agent) : ceiling.permits a.args.operation :=
+  bounded.bounded _ a.policyAllows
 
 /-- A lake target a model may name: letters, digits, `_`, `.`, `:`, `+`, `/`
     and `-` (`Mod.Sub`, `pkg/lib`, `+Mod`, `Lib:static`), nothing a shell or
@@ -242,7 +292,24 @@ def Args.parse (name : String) (arguments : String) : Except String Args := do
     let a : LunCallArgs ← fromJson? j
     check (a.kind == "function" || a.kind == "graph") "lun_call.kind: 'function' or 'graph'"
     check (Validate.functionName a.name) "lun_call.name: a function or graph name (dotted identifiers)"
-    return .lunCall a.kind a.name (a.body.getD (Json.mkObj []))
+    let body := a.body.getD (Json.mkObj [])
+    let fields ← body.getObj? |>.mapError (fun _ => "lun_call.body: must be an input object")
+    let allowed := if a.kind == "function" then ["input", "inputs"] else ["inputs"]
+    check (fields.toList.all (fun (name, _) => allowed.contains name))
+      "lun_call.body: only function input/inputs or graph inputs are accepted; execution policy and credentials are caller-owned"
+    check (!((body.getObjVal? "input").isOk && (body.getObjVal? "inputs").isOk))
+      "lun_call.body: choose input or inputs, not both"
+    let input ← if a.kind == "graph" then do
+      let inputs := (body.getObjVal? "inputs").toOption
+      if let some value := inputs then
+        check value.getObj?.isOk "lun_call.body.inputs: graph inputs must be an object"
+      pure (RuntimeInput.graph inputs)
+    else if let .ok inputs := body.getObjValAs? (Array Json) "inputs" then
+      pure (RuntimeInput.batch inputs)
+    else if (body.getObjVal? "inputs").isOk then
+      throw "lun_call.body.inputs: function batch inputs must be an array"
+    else pure (RuntimeInput.function (body.getObjVal? "input").toOption)
+    return .lunCall a.name input
   | other => throw s!"there is no tool named '{other}'"
 
 -- ── Specifications ──────────────────────────────────────────────────────────
@@ -303,10 +370,14 @@ def specs : Array Model.ToolSpec := #[
     description := "Call a function, or run a graph once, of the latest ready lun build. Function body: {\"input\": x} (x is the value, an array of values for several arguments, omitted for none) or {\"inputs\": [x1, x2]} for several calls. Graph body: {\"inputs\": {\"name\": value}}."
     schema := object [("kind", Json.mkObj [("type", "string"), ("enum", toJson #["function", "graph"])]),
       ("name", prop "string" "The function or graph name"),
-      ("body", prop "object" "The request body")] ["kind", "name"] } ]
+      ("body", prop "object" "Input data only: function input or inputs, graph inputs. Execution policy, bindings and credentials are never model-selected.")] ["kind", "name"] } ]
 
 /-- The tools of an agent, by name. -/
 def specsFor (names : List String) : Array Model.ToolSpec := specs.filter (names.contains ·.name)
+
+/-- Advertise the same intersection that execution consumes. -/
+def specsForPolicy (policy : Policy) (agent : List String) : Array Model.ToolSpec :=
+  specsFor (agent.filter policy.names.contains)
 
 -- ── Execution ───────────────────────────────────────────────────────────────
 
@@ -414,7 +485,7 @@ def check (env : Env) (targets : Array String) : IO (String × Bool) := do
 
 /-- Run one parsed tool call. Returns the result text and whether it is an
     error. -/
-def run (env : Env) : Args → IO (String × Bool)
+private def runUnchecked (env : Env) : Args → IO (String × Bool)
   | .read p offset limit => do
     let (_, file) ← IO.ofExcept (env.resolve p |>.mapError IO.userError)
     unless ← file.pathExists do return (s!"'{p}' does not exist", true)
@@ -489,21 +560,28 @@ def run (env : Env) : Args → IO (String × Bool)
     try return (← env.publish message, false) catch e => return (s!"publish failed: {e}", true)
   | .lunBuild => do
     try env.lunBuild catch e => return (s!"lun_build failed: {e}", true)
-  | .lunCall kind name body => do
-    try return (← env.lunCall kind name body, false) catch e => return (s!"lun_call failed: {e}", true)
+  | .lunCall name input => do
+    try return (← env.lunCall input.kind name input.body, false) catch e => return (s!"lun_call failed: {e}", true)
 
 /-- Run a tool call, if the agent has that tool; every failure becomes an
     error result for the model, never an exception. -/
-def execute (env : Env) (allowed : List String) (call : ToolCall) : IO ToolResult := do
+def run (env : Env) (authorized : AuthorizedArgs policy agent) : IO (String × Bool) :=
+  runUnchecked env authorized.args
+
+/-- Parse then authorize the exact operation before any tool IO. -/
+def execute (env : Env) (policy : Policy) (allowed : List String) (call : ToolCall) : IO ToolResult := do
   let result (content : String) (isError : Bool) : ToolResult :=
-    { id := call.id, name := call.name, content, isError }
+    { id := call.id, name := call.name, content, isError, nativeId := call.nativeId }
   unless allowed.contains call.name do
     return result s!"the tool '{call.name}' is not available (available: {", ".intercalate allowed})" true
   match Args.parse call.name call.arguments with
   | .error e => return result s!"invalid arguments: {e}" true
   | .ok args =>
+    let authorized ← match AuthorizedArgs.check policy allowed args with
+      | .ok a => pure a
+      | .error e => return result e true
     try
-      let (content, isError) ← run env args
+      let (content, isError) ← run env authorized
       return result content isError
     catch e => return result (toString e) true
 

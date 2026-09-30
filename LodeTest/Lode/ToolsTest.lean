@@ -43,6 +43,11 @@ namespace LodeTests.Tools
 #guard (Args.parse "lun_call" "{\"kind\": \"dag\", \"name\": \"main\"}").toOption.isNone
 #guard (Args.parse "lun_call" "{\"kind\": \"both\", \"name\": \"x\"}").toOption.isNone
 #guard (Args.parse "lun_call" "{\"kind\": \"graph\", \"name\": \"../x\"}").toOption.isNone
+#guard (Args.parse "lun_call" "{\"kind\":\"function\",\"name\":\"f\",\"body\":{\"input\":{\"policy\":\"ordinary input data\"}}}").toOption.isSome
+#guard (Args.parse "lun_call" "{\"kind\":\"function\",\"name\":\"f\",\"body\":{\"input\":1,\"policy\":{}}}").toOption.isNone
+#guard (Args.parse "lun_call" "{\"kind\":\"function\",\"name\":\"f\",\"body\":{\"binding\":{},\"connectors\":{}}}").toOption.isNone
+#guard (Args.parse "lun_call" "{\"kind\":\"function\",\"name\":\"f\",\"body\":{\"input\":1,\"inputs\":[2]}}").toOption.isNone
+#guard (Args.parse "lun_call" "{\"kind\":\"graph\",\"name\":\"g\",\"body\":[1]}").toOption.isNone
 #guard (Args.parse "rm" "{}").toOption.isNone
 
 -- ── read ────────────────────────────────────────────────────────────────────

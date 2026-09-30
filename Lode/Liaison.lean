@@ -14,7 +14,7 @@
   `decodeWarrant` when credentials arrive, so one liaison would refuse as
   malformed is refused then; the fields next to it are derived from its
   caveats (`Request.ofWarrant`, proven unable to disagree with the warrant);
-  requests are built with `Body.provider` and replies read with
+   requests are built with `Body.connector` and replies read with
   `decodeReply`. JSON crosses between Lean core's `Lean.Json` (lode's) and
   linen's `Data.Json.Value` (liaison's) through linen's `Data.Json.Bridge`.
 
@@ -43,15 +43,23 @@ structure Credentials where
   /-- The credits each call holds (`0` for repository calls, whose warrants
       carry `budget(0)`). -/
   cost : Credits := 0
+  /-- Independent named-operation warrants; none widens the primary warrant. -/
+  operations : List (String × Warrant) := []
 
 /-- The provider the warrant is for. -/
 def Credentials.provider (c : Credentials) : String := c.grant.provider.value
 
 /-- Credentials as a request carries them. -/
+structure OperationCredentialJson where
+  operation : String
+  warrant : Json
+  deriving FromJson
+
 structure CredentialsJson where
   warrant : Json
   account : String
   cost : Option Nat := none
+  operations : Option (List OperationCredentialJson) := none
   deriving FromJson
 
 /-- A warrant, from Lean core's JSON, decoded as liaison decodes it. -/
@@ -71,7 +79,17 @@ def Credentials.ofJson (c : CredentialsJson) (ctx : String) (providers : List St
     throw s!"{ctx}: the warrant is for '{grant.provider.value}', expected one of {providers}"
   unless accountMatchesResource c.account grant.resource.value do
     throw s!"{ctx}.account: must be {"{user_id}/{connection_id}"}, the connection being the warrant's resource"
-  return { warrant, account := c.account, grant, cost := c.cost.getD 0 }
+  let mut operations := []
+  for entry in c.operations.getD [] do
+    let token ← decodeWarrantJson entry.warrant
+    let bound ← Request.ofWarrant token 0 (c.cost.getD 0)
+    unless bound.provider == grant.provider && bound.orgId == grant.orgId &&
+        bound.resource == grant.resource && bound.action.value == entry.operation do
+      throw s!"{ctx}.operations: operation warrant identity mismatch"
+    unless !operations.any (fun pair => pair.1 == entry.operation) do
+      throw s!"{ctx}.operations: duplicate operation warrant"
+    operations := operations ++ [(entry.operation, token)]
+  return { warrant, account := c.account, grant, cost := c.cost.getD 0, operations }
 
 /-- Parse credentials from a request's JSON. -/
 def Credentials.parse (j : Json) (ctx : String) (providers : List String) :
@@ -80,8 +98,8 @@ def Credentials.parse (j : Json) (ctx : String) (providers : List String) :
 
 -- ── Calling ─────────────────────────────────────────────────────────────────
 
-/-- The current Unix time in seconds (liaison checks warrant expiry against
-    the caller's clock). -/
+/-- The current Unix time in seconds for SDK caveat checks. The broker verifies
+    expiry independently against its own clock. -/
 def nowSeconds : IO Nat := do
   return (← Data.Time.getCurrentTime).nanosSinceEpoch / 1000000000
 
@@ -96,10 +114,48 @@ def refusal (httpStatus : Nat) (code : String) : String :=
 /-- Make `call` through liaison at `base` (e.g. `http://liaison:8080`), under
     `c`'s warrant. A refusal is an exception whose message starts with
     `liaison refused`. -/
-def call (base : String) (c : Credentials) (x : ProviderCall) (timeoutMs : Nat) : IO Response := do
-  let body ← IO.ofExcept <| (Body.provider c.warrant (← nowSeconds).toUInt64 c.cost x).mapError IO.userError
+def connectorBody (c : Credentials) (now : UInt64) (operation : String) (resource : List String)
+    (payload : Json) : Except String Body := do
+  let token ← if c.grant.action.value == operation then pure c.warrant else
+    match c.operations.find? (fun pair => pair.1 == operation) with
+    | some (_, token) => pure token
+    | none => throw s!"no warrant for native operation {operation}"
+  Body.connector token now c.cost { account := c.account, operation, resource, payload := payload.compress }
+
+def call (base : String) (c : Credentials) (operation : String) (resource : List String)
+    (payload : Json) (timeoutMs : Nat) : IO Response := do
+  let body ← IO.ofExcept <| (connectorBody c (← nowSeconds).toUInt64 operation resource payload).mapError IO.userError
   let target := (if base.endsWith "/" then (base.dropEnd 1).toString else base) ++ "/v0/egress"
   let a ← Http.request .POST target [("content-type", "application/json")] (some body.encode) timeoutMs
+  match ← IO.ofExcept ((decodeReply (Http.status a) (Http.text a)).mapError IO.userError) with
+  | .relayed r => return r
+  | .refused st code => throw (IO.userError (refusal st code))
+
+/-- Structured conversation metadata, never caller-selected auth headers. The
+    broker derives gateway headers from these fields using its own adapter. -/
+structure NativeContext where
+  sessionId : String
+  initiator : String
+  client : String := "typednotes-lode"
+  deriving Lean.ToJson
+
+/-- The production model envelope is URL-free. Its action is checked by the
+    SDK against the warrant; the broker owns native routing and credentials. -/
+def inferenceBody (c : Credentials) (now : UInt64) (model : String) (payload : Json)
+    (context : NativeContext) : Except String Json := do
+  let native : _root_.Liaison.Wire.NativeContext :=
+    { sessionId := context.sessionId, initiator := context.initiator, client := context.client }
+  unless native.valid do throw "inference context: invalid session, initiator or client identity"
+  let body ← Body.connector c.warrant now c.cost
+    { account := c.account, operation := "inference.generate", resource := model.splitOn "/", payload := payload.compress,
+      context := some native }
+  body.toValue.toLeanJson
+
+def inference (base : String) (c : Credentials) (model : String) (payload : Json)
+    (context : NativeContext) (timeoutMs : Nat) : IO Response := do
+  let body ← IO.ofExcept ((inferenceBody c (← nowSeconds).toUInt64 model payload context).mapError IO.userError)
+  let target := (if base.endsWith "/" then (base.dropEnd 1).toString else base) ++ "/v0/egress"
+  let a ← Http.request .POST target [("content-type", "application/json")] (some body.compress) timeoutMs
   match ← IO.ofExcept ((decodeReply (Http.status a) (Http.text a)).mapError IO.userError) with
   | .relayed r => return r
   | .refused st code => throw (IO.userError (refusal st code))

@@ -38,7 +38,7 @@ import Lode.Prompt
 
 namespace Lode
 
-open Lean (Json FromJson fromJson?)
+open Lean (Json ToJson FromJson fromJson?)
 
 /-- The credentials a session holds, each optional. -/
 structure CredentialSet where
@@ -84,6 +84,7 @@ structure SessionRequest where
   lun : Option LunJson := none
   agent : Option String := none
   message : Option String := none
+  tools : Option Tools.Policy := none
   deriving FromJson
 
 /-- Fresh credentials, field by field (`PUT …/credentials`, or with a message). -/
@@ -98,6 +99,7 @@ structure MessageRequest where
   text : String
   credentials : Option CredentialsRefresh := none
   agent : Option String := none
+  tools : Option Tools.Policy := none
   deriving FromJson
 
 -- ── Checking them ───────────────────────────────────────────────────────────
@@ -109,6 +111,7 @@ structure SessionSpec where
   model : Model.Config
   creds : CredentialSet
   message : Option String
+  tools : Tools.Policy := Tools.Policy.all
 
 /-- The providers a repository warrant may be for. -/
 def repoProviders (repo : System.Git.Repository) : Except String (List String) :=
@@ -128,6 +131,7 @@ def CredentialsRefresh.check (r : CredentialsRefresh) (repo : System.Git.Reposit
 
 /-- Parse a credentials refresh. -/
 def CredentialSet.parse (j : Json) (repo : System.Git.Repository) : Except String CredentialSet := do
+  if (j.getObjVal? "tools").isOk then throw "credentials: tool policy updates belong on messages"
   let r : CredentialsRefresh ← (fromJson? j).mapError ("credentials: " ++ ·)
   r.check repo
 
@@ -140,6 +144,9 @@ def checkText (t : String) (ctx : String) : Except String String := do
 /-- Parse a message request. -/
 def MessageRequest.parse (j : Json) : Except String MessageRequest := do
   let m : MessageRequest ← (fromJson? j).mapError ("message: " ++ ·)
+  if let .ok tools := j.getObjVal? "tools" then let _ ← Tools.Policy.parse tools
+  if let .ok credentials := j.getObjVal? "credentials" then
+    if (credentials.getObjVal? "tools").isOk then throw "credentials: tool policy updates belong on messages"
   let _ ← checkText m.text "message.text"
   return m
 
@@ -148,6 +155,7 @@ def MessageRequest.parse (j : Json) : Except String MessageRequest := do
 def SessionSpec.parse (j : Json) (defaultModel : Option Model.Config) (allowLocal : Bool) :
     Except String SessionSpec := do
   let r : SessionRequest ← (fromJson? j).mapError ("request: " ++ ·)
+  if let .ok tools := j.getObjVal? "tools" then let _ ← Tools.Policy.parse tools
   let repo ← System.Git.Repository.parse r.source.url allowLocal |>.mapError ("source.url: " ++ ·)
   unless System.Git.isBranchName r.source.branch do throw "source.branch: not a valid branch name"
   let path := r.source.path.getD ""
@@ -158,13 +166,65 @@ def SessionSpec.parse (j : Json) (defaultModel : Option Model.Config) (allowLoca
   let provider := modelCreds.map (·.provider)
   let model ← Model.Config.ofConfigJson mj.toConfigJson provider defaultModel allowLocal
   if let some p := provider then
-    unless model.api == Model.apiOfProvider p do
-      throw s!"model.api: a '{p}' connection speaks {(Model.apiOfProvider p).toString}"
+    unless Model.supportsApi p model.api do
+      throw s!"model.api: '{p}' does not support {model.api.toString}"
+    Model.checkProtocol p model
+    unless (modelCreds.map (·.grant.action.value)) == some "inference.generate" do
+      throw "model.credentials: the warrant must grant inference.generate"
   let lunCreds ← (r.lun.bind (·.credentials)).mapM (repoCreds · "lun.credentials" repo)
+  let orgs := [sourceCreds, modelCreds, lunCreds].filterMap id |>.map (·.grant.orgId.value)
+  if let some org := orgs.head? then
+    unless orgs.all (· == org) do throw "credentials: every connection must belong to the session's organization"
   let agent := r.agent.getD "build"
   unless (Prompt.agent? agent).isSome do throw "agent: 'build' or 'plan'"
   let message ← r.message.mapM (checkText · "message")
-  return { source := { repo, branch := r.source.branch, path }, agent, model
-           creds := { repo := sourceCreds, model := modelCreds, lun := lunCreds }, message }
+  return {
+    source := { repo, branch := r.source.branch, path }, agent, model
+    creds := { repo := sourceCreds, model := modelCreds, lun := lunCreds }, message
+    tools := r.tools.getD Tools.Policy.all }
+
+/-- Persisted connection identity, without warrant tags or credential material. -/
+structure CredentialBinding where
+  provider : String
+  account : String
+  orgId : String
+  deriving DecidableEq, ToJson, FromJson
+
+def CredentialBinding.ofCredentials (c : Liaison.Credentials) : CredentialBinding :=
+  { provider := c.provider, account := c.account, orgId := c.grant.orgId.value }
+
+structure CredentialBindings where
+  repo : Option CredentialBinding := none
+  model : Option CredentialBinding := none
+  lun : Option CredentialBinding := none
+  deriving ToJson, FromJson
+
+def CredentialBindings.ofCredentials (c : CredentialSet) : CredentialBindings :=
+  { repo := c.repo.map CredentialBinding.ofCredentials,
+    model := c.model.map CredentialBinding.ofCredentials,
+    lun := c.lun.map CredentialBinding.ofCredentials }
+
+/-- Refreshes replace expiry/budget/run caveats, never organization, connection
+    or native protocol. The broker authenticates each warrant independently. -/
+def CredentialBindings.check (bindings : CredentialBindings) (model : Model.Config)
+    (fresh : CredentialSet) : Except String CredentialBindings := do
+  let check (ctx : String) (old : Option CredentialBinding) (new : Option Liaison.Credentials) := do
+    let next := new.map CredentialBinding.ofCredentials
+    if let some previous := old then
+      if let some incoming := next then
+        unless incoming == previous do throw s!"{ctx}: refresh cannot change provider, account or organization"
+    return next <|> old
+  if let some c := fresh.model then
+    Model.checkProtocol c.provider model
+    unless c.grant.action.value == "inference.generate" do
+      throw "credentials.model: the warrant must grant inference.generate"
+  let next : CredentialBindings := {
+    repo := ← check "credentials.repo" bindings.repo fresh.repo
+    model := ← check "credentials.model" bindings.model fresh.model
+    lun := ← check "credentials.lun" bindings.lun fresh.lun }
+  let all := [next.repo, next.model, next.lun].filterMap id
+  if let some first := all.head? then
+    unless all.all (·.orgId == first.orgId) do throw "credentials: every connection must belong to the session's organization"
+  return next
 
 end Lode

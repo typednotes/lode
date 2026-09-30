@@ -1,12 +1,17 @@
 # lode — agent notes
 
 `lode` is the coding agent of typednotes: an HTTP service (Lean 4, on
-`linen` pinned `v1.9.2`, speaking to liaison with liaison's own wire module
-`Liaison.Wire`, pinned `v0.5.5`) that runs model-driven sessions over a branch of a
+`linen`, speaking to liaison with liaison's own wire module
+`Liaison.Wire`) that runs model-driven sessions over a branch of a
 git repository and writes the Lean projects `lun` builds and serves
 (functions, graphs, `lun.json`; lun's and linen's vocabulary — lun ≥ 0.2.0
 has no `cells`/`dags` aliases, and neither has lode). lode is the writer; lun is the runner — do not confuse
 the two. See `README.md` for the API and the design.
+
+Coordinated release set: **Lode 0.3.0 / Lun 0.3.0 / Typednotes 0.6.0 /
+Linen 1.10.0 / Liaison 0.6.0**. Package locks, image defaults and new-project
+defaults use this set. Publishing local release tags and deploying remain the
+user's actions.
 
 ## Layout
 
@@ -20,21 +25,27 @@ Pure modules (unit-tested with `#guard` in `LodeTest/`):
 - `Lode/Liaison.lean` — credentials (a warrant decoded by liaison's own
   `Liaison.Wire.decodeWarrant`, the grant read with `Request.ofWarrant`, the
   account checked with `accountMatchesResource`) and `call`, which builds the
-  request with `Body.provider` and reads the reply with `decodeReply`. JSON
+  request with `Body.connector` and reads the reply with `decodeReply`. Native
+  `repositories.*` and `inference.generate` calls select named-operation tokens;
+  `Liaison.Wire.NativeContext` carries the actual session and truthful client.
+  Generic provider egress is not a fallback. JSON
   crosses to liaison's `Data.Json.Value` through linen's `Data.Json.Bridge`.
 - `Lode/Message.lean` — the provider-independent conversation (`Message`,
   `ToolCall`, `ToolResult`, `Reply`), the log (`Entry`, JSON both ways) and
   `context` (what the model is sent: since the last compaction, every tool
   call answered — `answerDangling`).
-- `Lode/Model.lean` — `Config`, the Anthropic Messages and OpenAI Chat
-  Completions wire formats (`anthropicRequest`/`anthropicReply`,
-  `openaiRequest`/`openaiReply`), the `scripted` API (tests), and `complete`
+- `Lode/Model.lean` — `Config`, Messages, Chat Completions, Responses, Gemini
+  and Radius Pi/SSE serializers/reply parsers, the `scripted` API (tests),
+  reasoning/signature replay, `boundedHistory` for retired tools, and `complete`
   (liaison or direct transport; retries on 408/429/5xx with linen's
   `RetryPolicy`/`delayFor`, following a relayed `Retry-After`, stopping on
   abort).
 - `Lode/Tools.lean` — tool specs, `Args.parse` (the model's text → typed
   arguments), `numberLines`, `applyEdit`, truncation, and `run`/`execute`
-  (IO, through `Env`, which the session provides).
+  (IO, through `Env`, consuming `AuthorizedArgs`). `lun_call` carries typed
+  input-only data, never model-selected execution policy or credentials.
+- `Lode/ToolPolicy.lean` — finite tool operations, `BoundedPolicy`, and
+  kernel-checked reflexive/transitive narrowing and launch-ceiling bounds.
 - `Lode/Compaction.lean` — when to compact, where to cut (before an
   assistant entry), the summarizer's transcript and instructions.
 - `Lode/Prompt.lean` — agents (`build`, `plan`), the system prompt (lun's
@@ -52,16 +63,22 @@ IO modules:
   abort flag, process group killed); `check` reads `lake build` with linen's
   `System.LakeLog`.
 - `Lode/Http.lean` — one request over linen's client.
-- `Lode/Workspace.lean` — the checkout: `open` (git clone, or the GitHub
-  tarball / GitLab archive through liaison, made a local repo), `changes`
-  (`git diff --raw` against `localBase`), `publish` (git push, or GitHub
-  blobs→tree→commit→fast-forward ref, or a GitLab commit with actions),
-  `seedCache` (linen from the package cache; the locked revision read with
+- `Lode/Workspace.lean` — the checkout: `open` (public/local git clone, or
+  brokered immutable branch/tree/file views materialized using private
+  `NativeFile` witnesses), `changes` (`git diff --raw` against `localBase`),
+  and `publish` (a subtree-scoped native commit plan with an expected head).
+  The broker uses GitHub `updateRefs` head CAS or GitLab generated smart-HTTP
+  receive-pack CAS; deletion requires independent authority. No archive,
+  signed download, generic HTTP or racy REST-commit fallback is used. Local-mode
+  git publication is separate from credentialed native publication.
+  Also `seedCache` (linen from the package cache; the locked revision read with
   Lake's own `Lake.Manifest.parse`).
 - `Lode/Session.lean` — sessions (persisted metadata, append-only log,
   credentials in memory), runs (`send`: start or steer; `loop`: structural
   in fuel; `tryFinish`/`finish`: atomic with the queue; abort), the tools'
-  `Env` (publish, lun), the registry.
+  `Env` (publish, lun), the registry, and a policy mutex that serializes actual
+  tool execution with monotonic narrowing. Metadata preserves the launch ceiling;
+  credentials remain in memory and are re-read for model calls/compaction.
 - `Lode/Server.lean` — routes. `Main.lean` — environment.
 
 ## Running tests
@@ -70,12 +87,17 @@ IO modules:
 lake test          # unit tests
 test/e2e.sh                   # scripted model, file:// repository, real git/lake
 test/liaison.sh               # GitHub/GitLab/Anthropic through test/mock_liaison.py
-test/lun.sh ../lun ../linen   # with a real lun (>= 0.2.0) and a linen checkout
+python3 test/native.py .lake/build/bin/lode # all native protocols, policy and restart
+test/lun.sh ../lun ../linen   # with the coordinated Lun/Linen source checkouts
 ```
 
-`LODE_E2E_KEEP=1` keeps a test's work directory. The first build copies
-nothing: if you have lun built next door, `cp -R ../lun/.lake/packages/linen
-.lake/packages/` saves building linen (same revision, same toolchain).
+`LODE_E2E_KEEP=1` keeps a test's work directory. Before releases are published,
+use the sibling path-override Lake workspace (`lake build lode:exe +LodeTest`).
+The real broker suite also executes compiled Lode model/Workspace callers;
+the app's `scripts/test_native_connectors.py --runtime --real-writer` exercises
+the full app → Lode → broker → local Git → Lun pipeline. See
+`docs/native-writer.md` for reproduction and the distinction between fixtures
+and paid-provider conformance.
 
 ## Conventions
 
@@ -112,28 +134,29 @@ nothing: if you have lun built next door, `cp -R ../lun/.lake/packages/linen
 **Never run `git push` in this repo.** Commits are fine when asked for;
 pushing is always left to the user.
 
-## Known gaps (named, not silent)
+## Verified contracts and remaining boundaries
 
-- **No run against a real model has been made here** (no API key was
-  available). Both wire formats are unit-tested, exercised end to end against
-  a mock liaison (Anthropic format), and a real `api.anthropic.com` /
-  `api.openai.com` answered lode's requests (with a `401` for a fake key:
-  lode's outbound TLS client, framing and error reporting verified; lode
-  itself serves plain HTTP on an internal network). Prompt quality — whether a model
-  reliably drives the workflow to a green lun build — is unmeasured.
+- **Real local pipeline verified.** The release-preparation suites pass 99 app
+  API tests, 24 browser groups, 655 real broker HTTP cases and 69 compiled-runtime
+  cases, plus the full app/compiled-Lode/broker/local-Git/compiled-Lun positive
+  and denial pipeline. Provider replies are controlled local fixtures; paid
+  provider/OAuth conformance and real-model implementation quality remain unmeasured.
 - **Warrants expire** (the app mints them for 300 s) and lode cannot mint or
   refresh them: a long run fails with `expired` unless the caller refreshes
   credentials (`PUT …/credentials`, or with each message). The run then ends
   with an error naming the cause; the next message resumes the session.
-- **No attenuation.** `typednotes/docs/services/agent.md` asks the agent to
-  `narrow` its warrant before each sub-call and to prove
-  `run_authority_bounded`. lode forwards warrants as given (it has no root
-  key); authority is bounded by what the caller mints, not narrowed further.
-- **The model goes through liaison's generic `provider` egress** (liaison
-  0.5.3's `inference` call kind is still a stub), charged
-  the flat `cost` per call (liaison's `inference` kind is a stub): no token
-  metering. The request must fit liaison's UTF-8 body; replies are relayed
-  whole (no streaming, so progress is visible per step, not per token).
+- **Authority is narrowed and intersected.** The app supplies organization tool
+  settings at launch and applies narrowing before acknowledging policy edits.
+  `BoundedPolicy`/`AuthorizedArgs` prove dispatch stays within the launch/current
+  tool ceiling and agent selection. Trusted broker projections bind conversation
+  tools and publication branch/subtree; each native operation intersects
+  organization, connection, cell and warrant scopes. Lode does not mint warrants
+  or possess the HMAC root key. These guarantees are not a general sandbox.
+- **Native model calls** use `inference.generate`, bounded inline local function
+  metadata/replay and typed session context. Radius Pi/SSE is enabled and tested.
+  Replies are buffered; the app observes steps, not streamed provider tokens.
+  Declared per-call costs are held/settled by the broker; reported token usage is
+  tracked separately, not a promise of token-priced billing.
 - **Abort** stops at the next step, and kills a running `bash`/`check`
   process group or a lun wait, but an in-flight model call runs to its end
   (or `LODE_MODEL_TIMEOUT`).
@@ -141,8 +164,10 @@ pushing is always left to the user.
   Git Data API refuses them). If someone else pushes to the branch, `publish`
   refuses (fast-forward only) and there is no `sync`/rebase tool yet: start a
   new session from the new head.
-- **GitLab**: the branch-moved check and the commit are two calls (a small
-  race window); symbolic links cannot be published through its API.
+- **Native repository limits:** unambiguous `[owner,repo]`, SHA-1 commits,
+  regular files and bounded complete trees. Nested GitLab namespaces, SHA-256
+  repositories and symlinks/submodules are refused. Both native publication
+  backends consume an exact expected-head condition; branch rewinds are tested.
 - **Public repositories without credentials are read-only** (`publish`
   fails); `git` push works only in local mode.
 - **Types are not a sandbox, and neither are the tools.** `bash` runs
@@ -161,18 +186,22 @@ pushing is always left to the user.
 - **After a restart** sessions and logs are intact but hold no credentials;
   an interrupted run is recorded, and any tool call it left unanswered is
   answered with an error on the next model call.
-- **OpenAI-compatible endpoints get `max_tokens`**, which OpenAI's reasoning
-  models refuse (they want `max_completion_tokens`). Text only: no images.
+- **Text/local tools only:** reasoning Chat models receive
+  `max_completion_tokens`; Responses use stateless encrypted reasoning replay.
+  Provider-hosted tools and remote retrieval are refused. Classifier-only models
+  cannot drive the writer. No image/multimodal writer workflow is claimed.
 - **Compaction** estimates tokens (provider usage when reported, else
   characters / 4) and summarizes with the session's own model; it has only
-  been exercised through its pure parts and the scripted model.
-- **lun's live graph sessions are not used.** lun 0.2.0 serves graph
+  been exercised through pure, scripted and native protocol fixtures. Retired-tool
+  history recovery preserves the user task without reviving replay authority.
+- **Lode does not own live graph sessions.** Lun serves graph
   sessions (`POST …/graphs/{name}/sessions`, then `POST /v0/sessions/{id}`
   updates some inputs and answers what changed); lode uses builds, function
-  calls and one-shot graph runs only. Verified against lun `fe6af51`
-  (0.2.0 + 3).
+  calls and one-shot graph runs only; the app owns live registration and feeds.
 - **Graphs are inputs and functions only**, because lun refuses linen's other
   reactive operators (`map`, `scan`, `combineLatest` with a lambda, …) in a
   graph; the prompt says so and asks for that logic to go into functions.
 - **The container image has not been built here**; the Linux link is
   unverified (lode's own link was verified on macOS).
+- **No LSP or web-fetch writer tool:** feedback remains `lake build` diagnostics.
+  Neither is implemented by the native connector work.

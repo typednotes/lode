@@ -14,8 +14,8 @@
   <a href="https://github.com/typednotes/lode/pkgs/container/lode"><img src="https://img.shields.io/badge/ghcr.io-typednotes%2Flode-blue?logo=docker" alt="Docker image"></a>
   <a href="https://github.com/typednotes/lode/tags"><img src="https://img.shields.io/github/v/tag/typednotes/lode?label=version&sort=semver" alt="Version"></a>
   <a href="https://lean-lang.org/"><img src="https://img.shields.io/badge/Lean-v4.34.0-blue" alt="Lean v4.34.0"></a>
-  <a href="https://github.com/typednotes/linen"><img src="https://img.shields.io/badge/built%20on-linen%20v1.9.2-c9b896" alt="Built on linen v1.9.2"></a>
-  <a href="https://github.com/typednotes/liaison"><img src="https://img.shields.io/badge/speaks-liaison%20v0.5.5-0e6b6f" alt="Speaks liaison v0.5.5"></a>
+   <a href="https://github.com/typednotes/linen"><img src="https://img.shields.io/badge/built%20on-linen%20v1.10.0-c9b896" alt="Built on linen v1.10.0"></a>
+   <a href="https://github.com/typednotes/liaison"><img src="https://img.shields.io/badge/speaks-liaison%20v0.6.0-0e6b6f" alt="Speaks liaison v0.6.0"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License: Apache 2.0"></a>
 </p>
 
@@ -29,9 +29,13 @@ signature ending in linen's `Eff`), **graphs** wiring them, and the `lun.json`
 declaring both. A session is done when lun builds the published commit and the
 functions and graphs answer as intended.
 
+This documentation describes the coordinated **Lode 0.3.0 / Lun 0.3.0 /
+Typednotes 0.6.0 / Linen 1.10.0 / Liaison 0.6.0** release. Package locks and
+runtime/image defaults use this set; local release tags still require publication.
+
 lode holds no third-party credential: it reaches the repository (GitHub,
-GitLab) and the model (Anthropic, Mistral, OpenAI or any OpenAI-compatible
-endpoint) through [`liaison`](https://github.com/typednotes/liaison), with
+GitLab) and supported generative models using Messages, Chat Completions,
+Responses, Gemini or Radius Pi/SSE through [`liaison`](https://github.com/typednotes/liaison), with
 warrants the typednotes app mints for each connection, in liaison's own wire
 format (`Liaison.Wire`). It is built on
 [`linen`](https://github.com/typednotes/linen) and runs as a container.
@@ -57,24 +61,37 @@ format (`Liaison.Wire`). It is built on
 
 ## Features
 
+- **Expanded provider routing** — Messages, Chat Completions, Responses, Gemini
+  and Radius's Pi/SSE protocol. The app's provider catalog selects the native API
+  for gateways; classifier-only TypeSafe and OpenCode models cannot drive a writer.
+
+- **Enforced writer permissions** — a launch `tools` allowlist is intersected
+  with the selected agent for both advertising and execution; later updates
+  may only narrow it. Execution consumes Lean permission witnesses. See
+  [native writer integration](docs/native-writer.md) for the app/broker contract,
+  proofs, verification and trusted boundaries. The app forwards organization
+  tool settings at launch and applies monotonic narrowing to live sessions.
+
 - **Writes for lun** — the system prompt carries lun's contract (functions,
   the allowed effects, graphs, `lun.json`), and the tools close the loop: `check`
   (`lake build` diagnostics), `publish`, `lun_build` (lun's diagnostics,
   attributed to each function and graph), `lun_call`.
 - **A shared repository** — one branch of a GitHub or GitLab repository,
-  opened and published through liaison (blobs → tree → commit →
-  fast-forward on GitHub, a commit with actions on GitLab); never a force
-  push, so someone else's work is never overwritten.
-- **Any model** — Anthropic's Messages API and OpenAI's Chat Completions
-  behind one provider-independent message model, through liaison (metered
-  per call) or, for development, directly.
+  opened through immutable native branch/tree/file views and published through
+  a subtree-scoped commit plan. The broker enforces exact-head atomic publication
+  on both hosts: GitHub `updateRefs` CAS and GitLab generated receive-pack CAS.
+  Write authority does not grant deletion; stale heads and rewinds are refused.
+- **Native model protocols** — five wire formats behind one conversation model,
+  with stateless reasoning/signature replay, truthful session context and bounded
+  local function tools. Calls are brokered and metered per declared call cost;
+  explicit direct transport remains a development option.
 - **Steerable** — a message sent while the agent works reaches it between two
   steps; runs can be aborted, followed by long-polling, and resumed after a
   restart.
 - **Bounded** — the loop is total (structural in its fuel: at most
   `LODE_MAX_STEPS` model calls per run); tool arguments are parsed into typed
-  values before anything runs; paths never leave the checkout (linen's
-  `FileSystem` capability, symbolic links resolved); lode's own secrets are
+  values before anything runs; named file-tool paths are scoped to the checkout
+  (linen's `FileSystem` capability, symbolic links resolved); lode's own secrets are
   scrubbed from what the model runs.
 - **Long sessions** — compaction by summary when the context fills up; an
   append-only log keeps everything.
@@ -94,7 +111,8 @@ lake build
 lake test          # unit tests (#guard): every parser and pure rule
 test/e2e.sh                   # a real agent loop (scripted model) over a real repository
 test/liaison.sh               # GitHub, GitLab and the model through a mock liaison
-test/lun.sh ../lun ../linen   # with a real lun (>= 0.2.0) and a linen checkout
+python3 test/native.py .lake/build/bin/lode  # native APIs and writer policy, no paid model
+test/lun.sh ../lun ../linen   # with the coordinated Lun/Linen source checkouts
 ```
 
 ### Run
@@ -106,7 +124,7 @@ LODE_WORKDIR=/tmp/lode LODE_TOKEN=... \
   lake exe lode
 ```
 
-Needs `git`, `tar`, `bash`, `elan`/`lake` and linen's native build
+Needs `git`, `bash`, `elan`/`lake` and linen's native build
 dependencies on the `PATH` (see the `Dockerfile`).
 
 Then open a session and give it a task:
@@ -114,10 +132,16 @@ Then open a session and give it a task:
 ```sh
 curl -s -X POST localhost:8080/v0/sessions -H "Authorization: Bearer $LODE_TOKEN" -d '{
   "source": {"url": "https://github.com/acme/sheets", "branch": "main", "path": "lean",
-             "credentials": {"warrant": {…}, "account": "{user_id}/{connection_id}"}},
+             "credentials": {"warrant": {…}, "account": "{user_id}/{connection_id}",
+               "operations": [{"operation": "repositories.write", "warrant": {…}}]}},
   "model": {"name": "claude-sonnet-4-5", "credentials": {"warrant": {…}, "account": "…", "cost": 10}},
-  "message": "Write a function that converts EUR to USD, and a graph summing two converted amounts."
+  "tools": ["read", "ls", "grep", "write", "edit", "check", "publish", "lun_build", "lun_call"]
 }'
+# The app's trusted minting service binds conversation/publication projections
+# to the returned $ID before starting native generation.
+curl -s -X POST "localhost:8080/v0/sessions/$ID/messages" \
+  -H "Authorization: Bearer $LODE_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"text":"Write a function that converts EUR to USD, and a graph summing two converted amounts."}'
 curl -s "localhost:8080/v0/sessions/$ID/messages?after=0&wait=30" -H "Authorization: Bearer $LODE_TOKEN"
 ```
 
@@ -150,11 +174,13 @@ naming the commit, the lun build and the services.
 | `bash` | a non-interactive command in the project directory (timeout ≤ 1800 s; last 2000 lines / 50 kB) |
 | `todo` | the model's task list (visible in the session's status) |
 | `check` | `lake build` (optionally of some targets): its errors and warnings |
-| `publish` | commit every change and push it to the branch |
+| `publish` | publish project changes through a broker-owned, scope-checked atomic commit plan; removals need independent deletion grants |
 | `lun_build` | have lun build the published commit with `lun.json`; wait; report state, diagnostics, functions, graphs |
 | `lun_call` | call a function, or run a graph once, of the latest ready build |
 
-Paths never leave the checkout; `.git` and `.lake` cannot be written. The
+Named file-tool paths are confined to the checkout; `.git` and `.lake` cannot be
+written through them. Allowed `bash`/Lake execution still relies on container
+isolation. The
 `plan` agent has `read`, `ls`, `grep`, `todo`, `check` and `lun_call`.
 
 ### `lun.json`
@@ -183,7 +209,7 @@ rebuild the project from the repository alone.
 | `GET /v0/sessions` | every session's status, newest first |
 | `GET /v0/sessions/{id}` | status: `state` (`idle`/`running`), `steps`, `queued`, `workspace.remoteHead`, `lastBuild`, `todos`, `usage`, `credentials` (which are held), `error` |
 | `DELETE /v0/sessions/{id}` | delete an idle session and its workspace |
-| `POST /v0/sessions/{id}/messages` | `{"text", "credentials"?, "agent"?}` → `202 {"queued", "session"}` |
+| `POST /v0/sessions/{id}/messages` | `{"text", "credentials"?, "agent"?, "tools"?}` → `202 {"queued", "session"}`; tools may only narrow |
 | `GET /v0/sessions/{id}/messages?after=n&wait=s` | `{"entries": [...], "next", "running"}`: the log from entry `n`; `wait` (≤ 60 s) holds the request until something new happens |
 | `POST /v0/sessions/{id}/abort` | `202`, or `409` if no run is going |
 | `PUT /v0/sessions/{id}/credentials` | `{"repo"?, "model"?, "lun"?}`: fresh warrants |
@@ -200,24 +226,41 @@ With `LODE_TOKEN` set, every route but `/_health` needs
     "url": "https://github.com/owner/repo",   // github.com, gitlab.com, or any https host (public, read-only)
     "branch": "main",                          // must exist; lode commits on it
     "path": "lean",                            // optional: the project directory
-    "credentials": { "warrant": { … }, "account": "{user_id}/{connection_id}" }  // github / gitlab connection
+    "credentials": { "warrant": { … }, "account": "{user_id}/{connection_id}", // repositories.read
+      "operations": [{"operation": "repositories.write", "warrant": { … }}] }
   },
   "model": {                                   // optional when the server has a default model
     "name": "claude-sonnet-4-5",
-    "credentials": { "warrant": { … }, "account": "…", "cost": 10 },  // anthropic / mistral / openai / openai-compatible
-    "api": "anthropic",                        // implied by the connection; "openai" for Chat Completions
+    "credentials": { "warrant": { … }, "account": "…", "cost": 10 },  // inference.generate
+    "api": "anthropic",                        // anthropic / openai / responses / gemini / pi
     "baseUrl": "https://api.anthropic.com/v1", // implied for anthropic, mistral, openai
     "maxTokens": 8192, "contextWindow": 200000
   },
   "lun": { "credentials": { … } },             // optional: what lun reads the repository with (default: source's)
   "agent": "build",                            // or "plan"
-  "message": "Write a function that …"             // optional: start at once
+  "tools": ["read", "ls", "grep", "write", "edit", "todo", "check"], // optional standalone; app sends org policy
+  "message": "Write a function that …"             // optional standalone; native app launch starts after projection binding
 }
 ```
 
 `cost` is the credits liaison holds for each model call. Warrants expire
 within minutes (the app mints them for 300 s): send fresh ones with each
 message, or with `PUT …/credentials`. They are kept in memory only.
+
+Native app launch omits the initial `message`: after creation returns the actual
+session ID, the trusted app binds conversation tools and publication branch/root
+projections, then sends the first message. This handshake is required for brokered
+writer generation; the wire-level optional `message` is not a minting bypass.
+
+Model warrants grant `inference.generate`. Model calls use URL-free connector
+egress with the native request payload; the broker derives routing and auth.
+Refreshes cannot change organization, provider or account. Native gateway
+`api` is validated against the chosen model. `tools: []` denies all writer
+tools; omission keeps the full standalone preset, and invalid/unknown tool
+restrictions are refused. Current policy and its immutable launch ceiling
+survive restart. Full native wire shapes, verified app provisioning and trusted
+boundaries are in
+[docs/native-writer.md](docs/native-writer.md).
 
 ### The log
 
@@ -243,19 +286,19 @@ isError}]`), `compaction` (`summary`, `firstKept`), `event` (`kind`:
 | `LODE_MAX_STEPS` | `200` | model calls per run |
 | `LODE_MODEL_TIMEOUT` / `LODE_GIT_TIMEOUT` / `LODE_CHECK_TIMEOUT` | `600` / `600` / `1800` | seconds |
 | `LODE_PACKAGE_CACHE` | — | pre-built linen checkouts, `{cache}/linen/{rev}` |
-| `LODE_LINEN_REV` / `LODE_TOOLCHAIN` | `v1.9.2` / `leanprover/lean4:v4.34.0` | what new projects are told to use |
+| `LODE_LINEN_REV` / `LODE_TOOLCHAIN` | `v1.10.0` / `leanprover/lean4:v4.34.0` | what new projects are told to use |
 | `LODE_ALLOW_LOCAL` | — | `1`: `file://` repositories and the `scripted` model. Tests only |
 
 ## Docker
 
 Images are published to `ghcr.io/typednotes/lode` — `edge` from `main`, and
 `latest`, `X.Y.Z` and `X.Y` from release tags. The image carries the Lean
-toolchain and linen (`LINEN_REF`, default `v1.9.2`) pre-built in the package
+toolchain and linen (`LINEN_REF`, coordinated target `v1.10.0`) pre-built in the package
 cache, so a workspace locked to that revision does not rebuild linen.
 
-Pick the tag that matches your lun: `0.1.x` speaks lun < 0.2.0 (cells and
-DAGs); `main` (`edge`, and releases after 0.1) speaks lun ≥ 0.2.0 (functions
-and graphs).
+Use the coordinated Lode/Lun `0.3.0` release line with Liaison `0.6.0` and
+Linen `1.10.0`. Historical `0.1.x` cell/DAG deployments do not implement this
+native authority contract. Registry/tag publication is release-parent-owned.
 
 ### Starting a container from the registry
 
@@ -304,11 +347,11 @@ Notes:
   the image's ownership; a bind mount must be writable by uid `10001`
   (`chown 10001 /srv/lode`). Credentials are never written there: after a
   restart, sessions resume once typednotes sends fresh warrants.
-- **Outbound network.** Model and GitHub/GitLab API calls go through liaison,
-  but the container itself still needs egress to `github.com` and
-  `codeload.github.com` (GitHub tarball downloads, `git`/`lake` fetching a
-  project's dependencies) and to Lean's release servers if a project asks for
-  another toolchain. The image carries the system CA bundle for those.
+- **Outbound network.** Credentialed model and repository calls stay brokered;
+  there are no direct signed-tarball downloads. Public repository clones and
+  `git`/`lake` dependency/toolchain acquisition still need build-time egress.
+  The image carries the system CA bundle; container/network isolation remains
+  part of the trusted build boundary.
 - **One lode per trust domain.** `bash` runs whatever the model asks inside the
   container, so the container is the isolation boundary: give it no
   credentials of its own and do not share it across organisations (see
@@ -350,12 +393,14 @@ lode takes its shape from two agents that got it right:
 - **From [OpenCode](https://opencode.ai)**: a client/server split (the agent
   *is* an HTTP server with sessions and messages); **agents** with tool
   allowlists; a `todo` tool; compiler **diagnostics fed back after edits**
-  (Lean itself as the language server); exact-string `edit`.
+  (whole-`lake build` compiler feedback); exact-string `edit`. A persistent Lean
+  LSP/hover/goals integration is not implemented.
 
-And from typednotes' agent design (`docs/services/agent.md`): a loop that is
+And from typednotes' service design: a loop that is
 **total by construction**, tool arguments **parsed into typed values** at the
 boundary where the model's text becomes an action, and authority that is only
-ever what the warrants carry.
+ever the intersection of organization/session tool settings, the selected agent,
+and the independently checked native connector/warrant ceilings.
 
 lode reuses before it writes: JSON through derived `ToJson`/`FromJson`,
 liaison's format through `Liaison.Wire`, and linen's URL encoding, dates,
@@ -364,14 +409,20 @@ parser.
 
 ## Project status
 
-`lode` is at **v0.1**: every path is exercised end to end — against a
-scripted model and real repositories, a mock liaison for GitHub, GitLab and
-Anthropic's format, and a real lun — but it has not yet been run against a
-real model, so how reliably a model drives the workflow to a green lun build
-is unmeasured. Warrants expire within minutes and lode cannot refresh them
-(the caller sends fresh ones); it forwards warrants as given rather than
-narrowing them; model calls are metered per call, not per token. See
-[`AGENTS.md`](AGENTS.md) for the module layout and the full list of named gaps.
+The **0.3.0 release-preparation** pipeline passes with the actual app, compiled
+Lode, real credential broker, disposable local Git, and compiled Lun, including
+tool execution, publication/adoption and denied operations. Supporting suites
+pass **99 app API tests**, **24 browser groups**, **655 real broker HTTP cases**
+and **69 compiled-runtime cases**. Provider replies remain controlled fixtures;
+live paid-provider/OAuth conformance and real-model implementation reliability
+are unmeasured.
+
+Warrants are refreshed by the caller; Lode does not mint them. Tool policies and
+credential identities are monotonic across refresh/restart. The Lean proofs
+bound named tool/native operations; arbitrary allowed shell commands, project
+Lakefiles, filesystem/transport FFI and container isolation remain trusted
+boundaries. No LSP or general writer web-fetch tool is implemented. See
+[`AGENTS.md`](AGENTS.md) and [native writer integration](docs/native-writer.md).
 
 ## License
 

@@ -17,7 +17,7 @@ here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/.." && pwd)"
 free_port() { python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])'; }
 port="$(free_port)"; lport="$(free_port)"
-work="$(mktemp -d /tmp/lode-liaison.XXXXXX)"
+work="$(mktemp -d "${LODE_TEST_TMP:-/var/folders/83/bq8tqpf57rv3ff7ftlnmh6k80000gp/T/opencode}/lode-liaison.XXXXXX")"
 base="http://127.0.0.1:$port"
 
 fail() { echo "FAIL: $*" >&2; echo "(work dir: $work)" >&2; exit 1; }
@@ -60,9 +60,9 @@ JSON
 python3 "$here/mock_liaison.py" "$lport" "$work/github.git" "$work/gitlab.git" "$work/script.json" "$work/egress.log" \
   >"$work/liaison.log" 2>&1 &
 liaison_pid=$!
-(cd "$root" && lake build lode >/dev/null)
+if [ -z "${LODE_TEST_BINARY:-}" ]; then (cd "$root" && lake build lode >/dev/null); fi
 LODE_WORKDIR="$work/lode" LODE_PORT="$port" LODE_TOKEN=secret LODE_LIAISON_URL="http://127.0.0.1:$lport" \
-  "$root/.lake/build/bin/lode" >"$work/lode.log" 2>&1 &
+  "${LODE_TEST_BINARY:-$root/.lake/build/bin/lode}" >"$work/lode.log" 2>&1 &
 lode_pid=$!
 trap 'kill $lode_pid $liaison_pid 2>/dev/null || true' EXIT
 for _ in $(seq 50); do curl -sf "$base/_health" >/dev/null && curl -sf "http://127.0.0.1:$lport/_health" >/dev/null && break; sleep 0.2; done
@@ -93,7 +93,7 @@ wait_idle() { # ID -> the whole log
 warrant() { # PROVIDER [EXPIRES-AT]
   jq -n --arg p "$1" --arg e "${2:-9999999999}" '{id: "w", orgId: "org", tag: "00", caveats: [
     {kind: "runId", value: "run-1"}, {kind: "budget", value: "0"}, {kind: "resource", value: "conn"},
-    {kind: "capability", provider: $p, action: "write"}, {kind: "expiresAt", value: $e}]}'
+    {kind: "capability", provider: $p, action: (if $p == "anthropic" then "inference.generate" else "write" end)}, {kind: "expiresAt", value: $e}]}'
 }
 creds() { jq -n --argjson w "$(warrant "$1" "${2:-9999999999}")" '{warrant: $w, account: "user/conn", cost: 3}'; }
 create() { # URL PROVIDER
@@ -126,21 +126,21 @@ expect "the status follows GitHub" 200 ".workspace.remoteHead == \"$new\"" "$(ap
 # What went through liaison for the model.
 model_calls="$(jq -c 'select(.provider == "anthropic")' "$work/egress.log")"
 first="$(head -n1 <<<"$model_calls")"
-jq -e '.cost == "3" and .call.method == "POST" and .call.url == "https://api.anthropic.com/v1/messages"' <<<"$first" >/dev/null \
+jq -e '.cost == "3" and .call.kind == "connector" and .call.operation == "inference.generate" and .call.resource == ["claude-test"] and .call.context.client == "typednotes-lode"' <<<"$first" >/dev/null \
   || fail "the model call's envelope: $first"
-jq -e '.call.headers | keys | map(ascii_downcase) | (index("x-api-key") == null and index("anthropic-version") == null)' <<<"$first" >/dev/null \
+jq -e '.call | (has("headers") | not) and (has("url") | not)' <<<"$first" >/dev/null \
   || fail "no credential headers from lode"
-body1="$(jq -r .call.body <<<"$first")"
+body1="$(jq -r .call.payload <<<"$first")"
 jq -e '.model == "claude-test" and (.tools | map(.name) | index("publish") != null) and (.system[0].text | test("lun"))
        and (.system[0].text | test("lean/"))' <<<"$body1" >/dev/null || fail "the first request: $body1"
-body2="$(jq -r .call.body <<<"$(sed -n 2p <<<"$model_calls")")"
+body2="$(jq -r .call.payload <<<"$(sed -n 2p <<<"$model_calls")")"
 jq -e '.messages[2].role == "user" and ([.messages[2].content[] | .tool_use_id] == ["toolu_1", "toolu_2"])' <<<"$body2" >/dev/null \
   || fail "the second request carries the tool results: $body2"
 pass "the model is reached through liaison, with tool results threaded back"
 # The third call was rate limited (429, `retry-after: 3`): the same request
 # again, after the 3 s the provider asked for (backoff alone would be ≤ 2 s).
-jq -e -s '(.[2].call.body == .[3].call.body) and (.[3].received - .[2].received >= 2.8)' <<<"$model_calls" >/dev/null \
-  || fail "a rate-limited call is retried after its Retry-After: $(jq -c -s 'map({received, n: (.call.body | length)})' <<<"$model_calls")"
+jq -e -s '(.[2].call.payload == .[3].call.payload) and (.[2].call.context.sessionId == .[3].call.context.sessionId) and (.[3].received - .[2].received >= 2.8)' <<<"$model_calls" >/dev/null \
+  || fail "a rate-limited call is retried after its Retry-After: $(jq -c -s 'map({received, n: (.call.payload | length)})' <<<"$model_calls")"
 pass "a rate-limited model call is retried after the provider's Retry-After"
 expect "usage is accumulated" 200 '.usage.input == 300 and .usage.output == 30' "$(api GET "/v0/sessions/$gh")"
 
@@ -165,8 +165,9 @@ clone="$work/other"
 git clone -q "$work/github.git" "$clone"
 echo more >> "$clone/lean/Demo.lean"
 git -C "$clone" -c user.email=o@x -c user.name=o -c commit.gpgsign=false commit -q -am "someone else"
-git -C "$clone" push -q origin main
-theirs="$(git -C "$work/github.git" rev-parse main)"
+theirs="$(git -C "$clone" rev-parse main)"
+git -C "$work/github.git" fetch -q "$clone" main
+git -C "$work/github.git" update-ref refs/heads/main "$theirs" "$(git -C "$clone" rev-parse "$theirs^")"
 api POST "/v0/sessions/$gh/messages" '{"text": "Bump the answer."}' >/dev/null
 log="$(wait_idle "$gh")"
 jq -e '[.entries[] | select(.type == "tool_results") | .results[] | select(.name == "publish")][-1] | .isError and (.content | test("moved"))' <<<"$log" >/dev/null \

@@ -191,14 +191,12 @@ private def commitLocally (ctx : Context) (dir : FilePath) (message : String) : 
 
 -- ── liaison helpers ─────────────────────────────────────────────────────────
 
-private def via (ctx : Context) (creds : Liaison.Credentials) (method url : String)
-    (body : Option Json := none) (accept : String := "application/json") :
+private def via (ctx : Context) (creds : Liaison.Credentials) (operation : String)
+    (resource : List String) (payload : Json) :
     IO _root_.Liaison.Wire.Response := do
   let some base := ctx.liaisonUrl
     | throw (IO.userError "this repository needs liaison, but LODE_LIAISON_URL is not set")
-  let headers := [("accept", accept)] ++ (if body.isSome then [("content-type", "application/json")] else [])
-  Liaison.call base creds
-    { method, url, account := creds.account, headers, body := body.map (·.compress) } ctx.timeoutMs
+  Liaison.call base creds operation resource payload ctx.timeoutMs
 
 private def jsonOf (u : _root_.Liaison.Wire.Response) (what : String) : IO Json :=
   match Json.parse (Liaison.text u) with
@@ -255,36 +253,98 @@ private def openGit (ctx : Context) (src : Source) (dir : FilePath) : IO State :
   return { remoteHead := head, localBase := head }
 
 /-- The branch head and tarball of a GitHub repository, through liaison. -/
+structure NativeFile where
+  private mk ::
+  components : List String
+  valid : _root_.Liaison.Wire.validResource components = true
+  writable : Validate.writable components = true
+  bookkeeping : components.all (fun part => part.toLower != ".git" && part.toLower != ".lake") = true
+  mode : String
+  regular : (["100644", "100755"].contains mode) = true
+
+def NativeFile.ofJson (entry : Json) : Except String NativeFile := do
+  let name ← entry.getObjValAs? String "path"
+  let components := name.splitOn "/"
+  if h : _root_.Liaison.Wire.validResource components = true then
+    if hw : Validate.writable components = true then
+      if hb : components.all (fun part => part.toLower != ".git" && part.toLower != ".lake") = true then
+        let mode ← entry.getObjValAs? String "mode"
+        if hm : (["100644", "100755"].contains mode) = true then
+          return ⟨components, h, hw, hb, mode, hm⟩
+        else throw "native checkout refuses symbolic links and submodules"
+      else throw "native checkout refuses repository bookkeeping paths"
+    else throw "native checkout refuses repository bookkeeping paths"
+  else throw "native checkout path leaves its repository"
+
+/-- A typed file selector retains its path-boundary evidence at execution. -/
+private theorem nativeFile_valid (file : NativeFile) :
+    _root_.Liaison.Wire.validResource file.components = true := file.valid
+
+private theorem nativeFile_regular (file : NativeFile) :
+    (["100644", "100755"].contains file.mode) = true := file.regular
+
+/-- Materialize a bounded immutable tree through native file reads. Never follow
+    provider download URLs or unpack provider-controlled archives. -/
+private def fetchNativeTree (ctx : Context) (creds : Liaison.Credentials) (src : Source)
+    (dir : FilePath) (head : String) : IO Unit := do
+  unless Validate.commit head do throw (IO.userError "repository head is not an immutable commit")
+  let tree ← via ctx creds "repositories.read" src.repo.segments
+    (Json.mkObj [("view", "tree"), ("ref", Json.str head)])
+  expect tree [200] "reading the repository tree"
+  let json ← jsonOf tree "reading the repository tree"
+  unless (json.getObjValAs? Bool "truncated").toOption == some false do
+    throw (IO.userError "native checkout refuses an incomplete tree")
+  let entries ← IO.ofExcept ((json.getObjValAs? (Array Json) "tree").mapError IO.userError)
+  unless entries.size ≤ 10000 do throw (IO.userError "native checkout has too many files")
+  let mut files := #[]
+  for entry in entries do
+    if (entry.getObjValAs? String "type").toOption == some "tree" then continue
+    unless (entry.getObjValAs? String "type").toOption == some "blob" do
+      throw (IO.userError "native checkout refuses submodules")
+    files := files.push (← IO.ofExcept ((NativeFile.ofJson entry).mapError IO.userError))
+  if ← dir.pathExists then throw (IO.userError "native checkout requires a fresh private directory")
+  IO.FS.createDirAll dir
+  let mut total := 0
+  for file in files do
+    let resource := src.repo.segments ++ file.components
+    let response ← via ctx creds "repositories.read" resource (Json.mkObj [("ref", Json.str head)])
+    expect response [200] "reading an immutable repository file"
+    let json ← jsonOf response "reading an immutable repository file"
+    unless (json.getObjValAs? String "encoding").toOption == some "base64" do
+      throw (IO.userError "native repository file is not base64")
+    let content ← strAt json ["content"] "reading an immutable repository file"
+    let some bytes := Data.Base64.decode ((content.replace "\n" "").replace "\r" "")
+      | throw (IO.userError "invalid repository base64")
+    total := total + bytes.size
+    unless total ≤ 64 * 1024 * 1024 do throw (IO.userError "native checkout exceeds 64 MiB")
+    let target := file.components.foldl (fun path component => path / component) dir
+    if let some parent := target.parent then IO.FS.createDirAll parent
+    IO.FS.writeBinFile target bytes
+    if file.mode == "100755" then
+      let r ← System.Process.run "chmod" #["+x", target.toString] ctx.timeoutMs
+      unless r.ok do throw (IO.userError (r.describe "restoring executable mode"))
+
 private def openGitHub (ctx : Context) (creds : Liaison.Credentials) (src : Source) (dir : FilePath) :
     IO State := do
-  let base ← IO.ofExcept (githubBase src.repo |>.mapError IO.userError)
-  let b ← via ctx creds "GET" s!"{base}/branches/{branchPath src.branch}" (accept := ghAccept)
+  let b ← via ctx creds "repositories.read" src.repo.segments
+    (Json.mkObj [("view", "branch"), ("ref", Json.str src.branch)])
   if b.status == 404 then throw (IO.userError s!"branch {src.branch} not found (lode needs an existing branch)")
   expect b [200] "reading the branch"
   let head ← strAt (← jsonOf b "reading the branch") ["commit", "sha"] "reading the branch"
-  let tar ← via ctx creds "GET" s!"{base}/tarball/{head}" (accept := ghAccept)
-  let archive ← if tar.status == 200 then pure tar.body else
-    match tar.status, tar.header? "location" with
-    | 302, some loc =>
-      unless isCodeloadUrl loc do throw (IO.userError "GitHub redirected the tarball to an unexpected host")
-      let a ← Http.request .GET loc (timeoutMs := ctx.timeoutMs)
-      unless Http.status a == 200 do throw (IO.userError s!"downloading the tarball: {Http.status a}")
-      pure a.body
-    | s, _ => throw (IO.userError s!"fetching the tarball: the host answered {s}")
-  unpack ctx archive dir
+  fetchNativeTree ctx creds src dir head
   initFromArchive ctx dir head
 
 /-- The branch head and archive of a GitLab project, through liaison. -/
 private def openGitLab (ctx : Context) (creds : Liaison.Credentials) (src : Source) (dir : FilePath) :
     IO State := do
-  let base := gitlabBase src.repo
-  let b ← via ctx creds "GET" s!"{base}/repository/branches/{percentEncode src.branch}"
+  unless src.repo.segments.length == 2 do
+    throw (IO.userError "nested GitLab namespaces require a native repository-selector adapter")
+  let b ← via ctx creds "repositories.read" src.repo.segments
+    (Json.mkObj [("view", "branch"), ("ref", Json.str src.branch)])
   if b.status == 404 then throw (IO.userError s!"branch {src.branch} not found (lode needs an existing branch)")
   expect b [200] "reading the branch"
   let head ← strAt (← jsonOf b "reading the branch") ["commit", "id"] "reading the branch"
-  let ar ← via ctx creds "GET" s!"{base}/repository/archive.tar.gz?sha={head}" (accept := "*/*")
-  expect ar [200] "fetching the archive"
-  unpack ctx ar.body dir
+  fetchNativeTree ctx creds src dir head
   initFromArchive ctx dir head
 
 /-- Fetch the branch into `dir` (which must not exist). -/
@@ -310,37 +370,41 @@ def githubTreeEntry (c : Change) (blobSha : Option String) : Json :=
   Json.mkObj [("path", c.path), ("mode", if c.status == 'D' then "100644" else c.mode),
               ("type", "blob"), ("sha", match blobSha with | some s => Json.str s | none => Json.null)]
 
+/-- A broker-owned compare-and-publish operation, scoped to the project subtree.
+    The native broker must independently validate every changed path and head.
+    Unsupported publication is a refusal, never a generic HTTP fallback. -/
+private def publishNative (ctx : Context) (creds : Liaison.Credentials) (src : Source) (dir : FilePath)
+    (st : State) (cs : Array Change) (message : String) : IO State := do
+  unless src.repo.segments.length == 2 do
+    throw (IO.userError "native publication requires an unambiguous owner/repository selector")
+  let boundary := if src.path.isEmpty then [] else src.path.splitOn "/"
+  let mut changes : Array Json := #[]
+  for change in cs do
+    let components := change.path.splitOn "/"
+    unless _root_.Liaison.Wire.validResource components && Validate.writable components && components.take boundary.length == boundary &&
+        components.length > boundary.length do
+      throw (IO.userError s!"{change.path}: publication leaves the project's declared subtree")
+    unless ["100644", "100755", "000000"].contains change.mode do
+      throw (IO.userError "native publication refuses symbolic links")
+    let contents ← if change.status == 'D' then pure Json.null else do
+      let bytes ← System.Process.runBytes "git" #["cat-file", "blob", change.blob] ctx.timeoutMs
+        (cwd := dir) (env := Process.hermeticGit)
+      let some text := String.fromUTF8? bytes | throw (IO.userError "native publication requires UTF-8 contents")
+      pure (Json.str text)
+    changes := changes.push (Json.mkObj [("resource", toJson (components.drop boundary.length)),
+      ("contents", contents), ("mode", Json.str change.mode), ("delete", toJson (change.status == 'D'))])
+  let response ← via ctx creds "repositories.write" (src.repo.segments ++ boundary)
+    (Json.mkObj [("view", "commit"), ("branch", Json.str src.branch), ("expectedHead", Json.str st.remoteHead),
+      ("message", Json.str message), ("changes", Json.arr changes)])
+  expect response [200, 201] "publishing the project through the native broker"
+  let json ← jsonOf response "publishing the project"
+  let commit ← strAt json ["commit"] "publishing the project"
+  unless Validate.commit commit do throw (IO.userError "native publication returned no immutable commit")
+  return { remoteHead := commit, localBase := ← commitLocally ctx dir message }
+
 private def publishGitHub (ctx : Context) (creds : Liaison.Credentials) (src : Source) (dir : FilePath)
     (st : State) (cs : Array Change) (message : String) : IO State := do
-  let base ← IO.ofExcept (githubBase src.repo |>.mapError IO.userError)
-  let call (method url : String) (body : Option Json) := via ctx creds method url body (accept := ghAccept)
-  let c ← call "GET" s!"{base}/git/commits/{st.remoteHead}" none
-  expect c [200] "reading the base commit"
-  let baseTree ← strAt (← jsonOf c "reading the base commit") ["tree", "sha"] "reading the base commit"
-  let mut entries : Array Json := #[]
-  for ch in cs do
-    if ch.status == 'D' then entries := entries.push (githubTreeEntry ch none)
-    else
-      let bytes ← System.Process.runBytes "git" #["cat-file", "blob", ch.blob] ctx.timeoutMs (cwd := dir)
-        (env := Process.hermeticGit)
-      let b ← call "POST" s!"{base}/git/blobs"
-        (some (Json.mkObj [("content", Data.Base64.encode bytes), ("encoding", "base64")]))
-      expect b [201] s!"uploading {ch.path}"
-      entries := entries.push (githubTreeEntry ch (some (← strAt (← jsonOf b "blob") ["sha"] "blob")))
-  let t ← call "POST" s!"{base}/git/trees"
-    (some (Json.mkObj [("base_tree", baseTree), ("tree", Json.arr entries)]))
-  expect t [201] "creating the tree"
-  let tree ← strAt (← jsonOf t "tree") ["sha"] "tree"
-  let k ← call "POST" s!"{base}/git/commits"
-    (some (Json.mkObj [("message", message), ("tree", tree), ("parents", toJson #[st.remoteHead])]))
-  expect k [201] "creating the commit"
-  let commit ← strAt (← jsonOf k "commit") ["sha"] "commit"
-  let r ← call "PATCH" s!"{base}/git/refs/heads/{branchPath src.branch}"
-    (some (Json.mkObj [("sha", commit), ("force", toJson false)]))
-  if r.status == 422 then
-    throw (IO.userError s!"branch {src.branch} moved on GitHub since {st.remoteHead.take 12} (someone else pushed); nothing was overwritten")
-  expect r [200] "updating the branch"
-  return { remoteHead := commit, localBase := ← commitLocally ctx dir message }
+  publishNative ctx creds src dir st cs message
 
 /-- One GitLab commit action. -/
 def gitlabAction (c : Change) (content : Option String) : Except String Json := do
@@ -354,23 +418,7 @@ def gitlabAction (c : Change) (content : Option String) : Except String Json := 
 
 private def publishGitLab (ctx : Context) (creds : Liaison.Credentials) (src : Source) (dir : FilePath)
     (st : State) (cs : Array Change) (message : String) : IO State := do
-  let base := gitlabBase src.repo
-  let b ← via ctx creds "GET" s!"{base}/repository/branches/{percentEncode src.branch}"
-  expect b [200] "reading the branch"
-  let head ← strAt (← jsonOf b "reading the branch") ["commit", "id"] "reading the branch"
-  unless head == st.remoteHead do
-    throw (IO.userError s!"branch {src.branch} moved on GitLab since {st.remoteHead.take 12} (someone else pushed); nothing was overwritten")
-  let mut actions : Array Json := #[]
-  for ch in cs do
-    let content ← if ch.status == 'D' then pure none else
-      some <$> Data.Base64.encode <$> System.Process.runBytes "git" #["cat-file", "blob", ch.blob] ctx.timeoutMs
-        (cwd := dir) (env := Process.hermeticGit)
-    actions := actions.push (← IO.ofExcept (gitlabAction ch content |>.mapError IO.userError))
-  let k ← via ctx creds "POST" s!"{base}/repository/commits"
-    (some (Json.mkObj [("branch", src.branch), ("commit_message", message), ("actions", Json.arr actions)]))
-  expect k [200, 201] "creating the commit"
-  let commit ← strAt (← jsonOf k "commit") ["id"] "commit"
-  return { remoteHead := commit, localBase := ← commitLocally ctx dir message }
+  publishNative ctx creds src dir st cs message
 
 /-- Publish every change since `localBase` as one commit on the remote
     branch. Returns the new state and a report for the model. -/

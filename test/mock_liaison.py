@@ -208,7 +208,16 @@ class Handler(BaseHTTPRequestHandler):
         if any(int(c["value"]) < int(req["now"]) for c in expiry):
             return self.reply(403, {"error": "expired"})
         call = req["call"]
-        if call["kind"] != "provider" or call["account"].split("/")[-1] != req["resource"]:
+        if call["account"].split("/")[-1] != req["resource"]:
+            return self.reply(400, {"error": "malformed_warrant"})
+        if call["kind"] == "connector":
+            assert req["provider"] == "anthropic"
+            assert req["action"] == call["operation"] == "inference.generate"
+            assert call["resource"] == ["claude-test"]
+            assert "url" not in call and "headers" not in call
+            assert call["context"]["client"] == "typednotes-lode"
+            return self.reply(200, anthropic("POST", "/v1/messages", json.loads(call["payload"])))
+        if call["kind"] != "provider":
             return self.reply(400, {"error": "malformed_warrant"})
         for h in call.get("headers", {}):
             if h.lower() in ("authorization", "x-api-key", "host", "content-length"):

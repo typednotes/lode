@@ -81,7 +81,7 @@ def transcript (entries : Array Entry) (cut : Nat) (maxChars : Nat) : String :=
     | none => ""
   let render : Message → String
     | .user t => s!"[User]\n{t}"
-    | .assistant t cs =>
+    | .assistant t cs | .assistantReplay t cs _ =>
       let calls := cs.toList.map fun c => s!"[Tool call] {c.name} {clip c.arguments 1500}"
       "\n".intercalate ((if t.isEmpty then [] else [s!"[Assistant]\n{t}"]) ++ calls)
     | .toolResults rs => "\n".intercalate (rs.toList.map fun r =>

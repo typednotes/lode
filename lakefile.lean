@@ -5,16 +5,16 @@ open System Lake DSL
 -- SHA-256) but none of its pkg-config libraries (no Postgres), so, like
 -- `lun`, it needs no extra link arguments.
 
-require linen from git "https://github.com/typednotes/linen" @ "v1.9.2"
+require linen from git "https://github.com/typednotes/linen" @ "v1.10.0"
 
 -- For `Liaison.Wire` only: liaison's wire format (`POST /v0/egress`), the
 -- module liaison's own server parses with. It is pure and imports none of
 -- liaison's HMAC, Postgres or egress code, so it adds no link arguments (as
 -- in lun).
-require liaison from git "https://github.com/typednotes/liaison" @ "v0.5.5"
+require liaison from git "https://github.com/typednotes/liaison" @ "v0.6.0"
 
 package lode where
-  version := v!"0.2.3"
+  version := v!"0.3.0"
   testDriver := "LodeTest"
 
 @[default_target]
@@ -28,3 +28,8 @@ lean_lib LodeTest where
 @[default_target]
 lean_exe lode where
   root := `Main
+
+-- Optional real-broker transport fixture, linked with the same native Linen
+-- HTTP/TLS implementation as the writer. Never part of a release default target.
+lean_exe «lode-native-smoke» where
+  root := `test.NativeBrokerSmoke

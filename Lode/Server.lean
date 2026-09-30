@@ -97,13 +97,12 @@ private def message (s : Session) (req : Network.WebApp.Request) : IO Network.We
     | .ok m => pure m
     | .error e => return error 400 e
   let repo := (← s.info.get).source.repo
-  match m.credentials.mapM (·.check repo) with
+  let creds ← match m.credentials.mapM (·.check repo) with
   | .error e => return error 400 e
-  | .ok creds => if let some c := creds then s.creds.modify (·.merge c)
-  if let some a := m.agent then
-    unless (Prompt.agent? a).isSome do return error 400 "message.agent: 'build' or 'plan'"
-    if ← s.running then return error 409 "the agent cannot change during a run"
-    s.updateMeta ({ · with agent := a })
+  | .ok creds => pure (creds.getD {})
+  match ← s.updateAccess creds m.tools m.agent with
+  | .error e => return error (if e == "the agent cannot change during a run" then 409 else 400) e
+  | .ok _ => pure ()
   let queued ← s.send m.text
   return json 202 (Json.mkObj [("queued", toJson queued), ("session", ← s.status)])
 
@@ -158,8 +157,9 @@ def route (r : Registry) (req : Network.WebApp.Request) : IO Network.WebApp.Resp
         match CredentialSet.parse j (← s.info.get).source.repo with
         | .error e => return error 400 e
         | .ok c =>
-          s.creds.modify (·.merge c)
-          return json 200 (← s.status)
+          match ← s.updateAccess c with
+          | .error e => return error 400 e
+          | .ok _ => return json 200 (← s.status)
       | ["diff"] =>
         unless is .GET do return error 404 "not found"
         return text (← Workspace.diff s.wctx (checkoutDir s.cfg s.id) (← s.info.get).workspace)

@@ -12,7 +12,7 @@ jobs:
       - uses: actions/checkout@v7
       # linen's native build dependencies (it builds its FFI as a dependency),
       # from linen's own list at the version lode requires.
-      - uses: typednotes/linen/.github/actions/setup-native-deps@v1.9.2
+      - uses: typednotes/linen/.github/actions/setup-native-deps@v1.10.0
         with:
           keyring: false
       - run: sudo apt-get install -y jq
@@ -37,14 +37,14 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: typednotes/lun
-          ref: ${{ vars.LUN_E2E_REF || 'v0.2.2' }}
+          ref: ${{ vars.LUN_E2E_REF || 'v0.3.0' }}
           path: lun
       - uses: actions/checkout@v7
         with:
           repository: typednotes/linen
-          ref: ${{ vars.LINEN_E2E_REF || 'v1.9.2' }}
+          ref: ${{ vars.LINEN_E2E_REF || 'v1.10.0' }}
           path: linen
-      - uses: typednotes/linen/.github/actions/setup-native-deps@v1.9.2
+      - uses: typednotes/linen/.github/actions/setup-native-deps@v1.10.0
         with:
           keyring: false
       - run: sudo apt-get install -y jq

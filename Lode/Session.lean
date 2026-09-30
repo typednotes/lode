@@ -67,7 +67,7 @@ structure Config where
   /-- Pre-built packages: `{cache}/linen/{rev}`. -/
   packageCache : Option FilePath := none
   /-- What new projects should require. -/
-  linenRev : String := "v1.9.2"
+  linenRev : String := "v1.10.0"
   toolchain : String := "leanprover/lean4:v4.34.0"
 
 -- ── Time ────────────────────────────────────────────────────────────────────
@@ -88,6 +88,9 @@ structure Meta where
   source : Workspace.Source
   agent : String
   model : Model.Config
+  tools : Tools.Policy := Tools.Policy.all
+  toolCeiling : Option Tools.Policy := none
+  credentialBindings : CredentialBindings := {}
   workspace : Workspace.State
   lastBuild : Option String := none
   todos : Array Tools.Todo := #[]
@@ -120,6 +123,7 @@ structure Session where
   cfg : Config
   id : String
   info : IO.Ref Meta
+  metaLock : Std.Mutex Unit
   entries : IO.Ref (Array Entry)
   creds : IO.Ref CredentialSet
   control : Std.Mutex Control
@@ -127,9 +131,12 @@ structure Session where
   todos : IO.Ref (Array Tools.Todo)
   /-- Model calls made by the current run. -/
   steps : IO.Ref Nat
+  /-- Immutable launch ceiling; the current policy is proof-bounded by it. -/
+  toolCeiling : Tools.Policy
+  toolPolicy : Std.Mutex (Tools.BoundedPolicy toolCeiling)
 
 /-- Write the metadata atomically (write, then rename), todos included. -/
-def Session.saveMeta (s : Session) : IO Unit := do
+private def Session.saveMetaUnlocked (s : Session) : IO Unit := do
   let m := { (← s.info.get) with todos := ← s.todos.get }
   s.info.set m
   let file := metaFile s.cfg s.id
@@ -137,10 +144,16 @@ def Session.saveMeta (s : Session) : IO Unit := do
   IO.FS.writeFile tmp (toJson m).pretty
   IO.FS.rename tmp file
 
+/-- Serialize metadata replacement so a concurrent save cannot restore an older
+    tool policy after an acknowledged narrowing, including after restart. -/
+def Session.saveMeta (s : Session) : IO Unit :=
+  s.metaLock.atomically (m := IO) s.saveMetaUnlocked
+
 /-- Change the metadata and save it. -/
-def Session.updateMeta (s : Session) (f : Meta → Meta) : IO Unit := do
-  s.info.modify f
-  s.saveMeta
+def Session.updateMeta (s : Session) (f : Meta → Meta) : IO Unit :=
+  s.metaLock.atomically (m := IO) do
+    s.info.modify f
+    s.saveMetaUnlocked
 
 /-- Append an entry to the log (memory and disk). -/
 def Session.append (s : Session) (e : Entry) : IO Unit := do
@@ -154,9 +167,13 @@ def Session.wctx (s : Session) : Workspace.Context :=
   { liaisonUrl := s.cfg.liaisonUrl, timeoutMs := s.cfg.gitTimeoutMs }
 
 private def make (cfg : Config) (m : Meta) (entries : Array Entry) : IO Session := do
-  return { cfg, id := m.id, info := ← IO.mkRef m, entries := ← IO.mkRef entries
-           creds := ← IO.mkRef {}, control := ← Std.Mutex.new {}, abort := ← IO.mkRef false
-           todos := ← IO.mkRef m.todos, steps := ← IO.mkRef 0 }
+  let ceiling := m.toolCeiling.getD m.tools
+  let policy ← IO.ofExcept ((Tools.BoundedPolicy.initial ceiling |>.narrow m.tools).mapError IO.userError)
+  return {
+    cfg, id := m.id, info := ← IO.mkRef m, metaLock := ← Std.Mutex.new (), entries := ← IO.mkRef entries
+    creds := ← IO.mkRef {}, control := ← Std.Mutex.new {}, abort := ← IO.mkRef false
+    todos := ← IO.mkRef m.todos, steps := ← IO.mkRef 0, toolCeiling := ceiling
+    toolPolicy := ← Std.Mutex.new policy }
 
 /-- Load a session from disk. A run a restart interrupted is recorded. -/
 def Session.load (cfg : Config) (id : String) : IO Session := do
@@ -182,8 +199,10 @@ def Session.create (cfg : Config) (spec : SessionSpec) : IO Session := do
   try
     let wctx : Workspace.Context := { liaisonUrl := cfg.liaisonUrl, timeoutMs := cfg.gitTimeoutMs }
     let st ← Workspace.open wctx spec.source spec.creds.repo (checkoutDir cfg id)
-    let m : Meta := { id, created := ← nowMs, source := spec.source, agent := spec.agent
-                      model := spec.model, workspace := st }
+    let m : Meta := {
+      id, created := ← nowMs, source := spec.source, agent := spec.agent
+      model := spec.model, workspace := st, tools := spec.tools
+      toolCeiling := some spec.tools, credentialBindings := CredentialBindings.ofCredentials spec.creds }
     let s ← make cfg m #[]
     s.creds.set spec.creds
     IO.FS.writeFile (logFile cfg id) ""
@@ -225,6 +244,7 @@ structure StatusView where
   queued : Nat
   source : Workspace.Source
   agent : String
+  tools : Tools.Policy
   model : ModelView
   workspace : WorkspaceView
   lastBuild : Option String := none
@@ -244,7 +264,7 @@ def Session.status (s : Session) : IO Json := do
   return toJson ({
     id := m.id, created := m.created, state := if c.running then "running" else "idle"
     steps := if c.running then some steps else none, queued := c.queue.size
-    source := m.source, agent := m.agent
+    source := m.source, agent := m.agent, tools := m.tools
     model := { api := m.model.api.toString, name := m.model.name, baseUrl := m.model.baseUrl }
     workspace := { remoteHead := m.workspace.remoteHead }, lastBuild := m.lastBuild
     todos := ← s.todos.get, usage := m.usage, entries := (← s.entries.get).size
@@ -328,9 +348,7 @@ inductive Outcome where
 structure Run where
   agent : Prompt.Agent
   system : String
-  tools : Array Model.ToolSpec
   env : Tools.Env
-  transport : Model.Transport
 
 /-- The number of assistant messages in the log (the `scripted` model's
     position). -/
@@ -338,7 +356,7 @@ def assistantCount (entries : Array Entry) : Nat := (entries.filter Entry.isAssi
 
 /-- Summarize the oldest part of the context if the context is close to the
     model's window. -/
-def Session.compactIfNeeded (s : Session) (r : Run) : IO Unit := do
+def Session.compactIfNeeded (s : Session) (_r : Run) : IO Unit := do
   let es ← s.entries.get
   let m := (← s.info.get).model
   unless Compaction.needed es m.contextWindow m.maxTokens do return
@@ -346,9 +364,12 @@ def Session.compactIfNeeded (s : Session) (r : Run) : IO Unit := do
   let before := Compaction.estimateTokens es
   let summary ← if m.api == .scripted then pure "(scripted summary)" else do
     let text := Compaction.transcript es cut (m.contextWindow * 2)
-    let reply ← Model.complete { m with maxTokens := min m.maxTokens 8192 } r.transport
-      Compaction.instructions #[] #[.user text] 0 s.cfg.modelTimeoutMs s.abort
+    let reply ← Model.complete { m with maxTokens := min m.maxTokens 8192 } (← s.transport)
+      Compaction.instructions #[] #[.user text] 0 s.cfg.modelTimeoutMs s.abort s.id (some "agent")
     s.updateMeta fun mt => { mt with usage := mt.usage + reply.usage }
+    unless reply.calls.isEmpty && !reply.text.trimAscii.isEmpty &&
+        reply.stop != "length" && reply.stop != "max_tokens" do
+      throw (IO.userError "compaction returned an incomplete summary; the original context was preserved")
     pure reply.text
   s.append (.compaction summary cut before (← nowMs))
 
@@ -392,8 +413,12 @@ def Session.loop (s : Session) (r : Run) : Nat → IO Outcome
     s.compactIfNeeded r
     let es ← s.entries.get
     let m ← s.info.get
-    let reply ← Model.complete m.model r.transport r.system r.tools (context es) (assistantCount es)
-      s.cfg.modelTimeoutMs s.abort
+    let policy ← s.toolPolicy.atomically (m := IO) do return (← get).policy
+    let system := r.system ++ "\n# Current writer tool policy\n\nAvailable tools: " ++
+      (", ".intercalate (r.agent.tools.filter policy.names.contains)) ++
+      ". Only these named tools may execute; removed tools stay unavailable after refresh or agent changes.\n"
+    let reply ← Model.complete m.model (← s.transport) system (Tools.specsForPolicy policy r.agent.tools)
+      (context es) (assistantCount es) s.cfg.modelTimeoutMs s.abort s.id
     s.steps.modify (· + 1)
     s.append (.assistant reply m.model.name (← nowMs))
     s.updateMeta fun mt => { mt with usage := mt.usage + reply.usage }
@@ -408,9 +433,16 @@ def Session.loop (s : Session) (r : Run) : Nat → IO Outcome
       let mut results : Array ToolResult := #[]
       for call in reply.calls do
         if ← s.abort.get then
-          results := results.push { id := call.id, name := call.name, content := "(aborted by the user)", isError := true }
+          results := results.push {
+            id := call.id, name := call.name, content := "(aborted by the user)", isError := true
+            nativeId := call.nativeId }
         else
-          results := results.push (← Tools.execute r.env r.agent.tools call)
+          -- Hold the policy lock across execution: a successful narrowing cannot
+          -- race a previously authorized call into executing broader authority.
+          let result ← s.toolPolicy.atomically (m := IO) do
+            let bounded ← get
+            Tools.execute r.env bounded.policy r.agent.tools call
+          results := results.push result
       s.append (.toolResults results (← nowMs))
       s.saveMeta
       s.loop r fuel
@@ -422,7 +454,6 @@ def Session.runToEnd (s : Session) : IO Unit := do
       let m ← s.info.get
       let some agent := Prompt.agent? m.agent | throw (IO.userError s!"unknown agent {m.agent}")
       let env ← s.toolEnv
-      let transport ← s.transport
       let cr ← s.creds.get
       let canPublish := match Workspace.backend m.source.repo cr.repo.isSome with
         | .git => m.source.repo.host == .local
@@ -433,7 +464,7 @@ def Session.runToEnd (s : Session) : IO Unit := do
           toolchain := s.cfg.toolchain, linenRev := s.cfg.linenRev, date := isoDate (← nowMs) }
       let system := Prompt.system agent penv (← Prompt.contextFiles env.root env.project)
       s.updateMeta ({ · with error := none })
-      s.loop { agent, system, tools := Tools.specsFor agent.tools, env, transport } s.cfg.maxSteps
+      s.loop { agent, system, env } s.cfg.maxSteps
     catch e => pure (.failed (toString e))
   match outcome with
   | .done => pure ()
@@ -467,6 +498,29 @@ def Session.requestAbort (s : Session) : IO Bool := do
 
 /-- Whether a run is going. -/
 def Session.running (s : Session) : IO Bool := return (← s.control.atomically (m := IO) get).running
+
+/-- Validate all changes before mutation. Credentials cannot alter the immutable
+    ceiling. Policy transitions are serialized with tool execution. -/
+def Session.updateAccess (s : Session) (fresh : CredentialSet := {})
+    (tools : Option Tools.Policy := none) (agent : Option String := none) : IO (Except String Unit) :=
+  s.toolPolicy.atomically (m := IO) do
+    let old ← get
+    let m ← s.info.get
+    let next ← match tools.mapM old.narrow with
+      | .ok next => pure (next.getD old)
+      | .error e => return .error e
+    let bindings ← match m.credentialBindings.check m.model fresh with
+      | .ok b => pure b
+      | .error e => return .error e
+    if let some a := agent then
+      unless (Prompt.agent? a).isSome do return .error "message.agent: 'build' or 'plan'"
+      if ← s.running then return .error "the agent cannot change during a run"
+    s.updateMeta fun mt =>
+      { mt with tools := next.policy, toolCeiling := some s.toolCeiling
+                credentialBindings := bindings, agent := agent.getD mt.agent }
+    s.creds.modify (·.merge fresh)
+    set next
+    return .ok ()
 
 -- ── The registry ────────────────────────────────────────────────────────────
 
