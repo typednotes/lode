@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # End-to-end test of lode's production paths, against a mock liaison
 # (test/mock_liaison.py): a private GitHub repository opened and published
-# through liaison's egress (blobs → tree → commit → fast-forward), the same
-# on GitLab (commits with actions), the model reached through liaison with
+# through liaison's native read/compare-and-publish operations, the same
+# on GitLab, the model reached through liaison with
 # its own warrant (Anthropic's wire format), a push race refused, and an
 # expired warrant reported.
 #
@@ -17,7 +17,7 @@ here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/.." && pwd)"
 free_port() { python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])'; }
 port="$(free_port)"; lport="$(free_port)"
-work="$(mktemp -d "${LODE_TEST_TMP:-/var/folders/83/bq8tqpf57rv3ff7ftlnmh6k80000gp/T/opencode}/lode-liaison.XXXXXX")"
+work="$(mktemp -d "${LODE_TEST_TMP:-${TMPDIR:-/tmp}}/lode-liaison.XXXXXX")"
 base="http://127.0.0.1:$port"
 
 fail() { echo "FAIL: $*" >&2; echo "(work dir: $work)" >&2; exit 1; }
@@ -90,12 +90,22 @@ wait_idle() { # ID -> the whole log
   done
   fail "session $1 did not finish"
 }
-warrant() { # PROVIDER [EXPIRES-AT]
-  jq -n --arg p "$1" --arg e "${2:-9999999999}" '{id: "w", orgId: "org", tag: "00", caveats: [
+warrant() { # PROVIDER [EXPIRES-AT] [OPERATION]
+  jq -n --arg p "$1" --arg e "${2:-9999999999}" --arg op "${3:-}" '{id: "w", orgId: "org", tag: "00", caveats: [
     {kind: "runId", value: "run-1"}, {kind: "budget", value: "0"}, {kind: "resource", value: "conn"},
-    {kind: "capability", provider: $p, action: (if $p == "anthropic" then "inference.generate" else "write" end)}, {kind: "expiresAt", value: $e}]}'
+    {kind: "capability", provider: $p, action: (if $op != "" then $op elif $p == "anthropic" then "inference.generate" else "repositories.read" end)}, {kind: "expiresAt", value: $e}]}'
 }
-creds() { jq -n --argjson w "$(warrant "$1" "${2:-9999999999}")" '{warrant: $w, account: "user/conn", cost: 3}'; }
+creds() {
+  local provider="$1" expires="${2:-9999999999}"
+  local operations='[]'
+  if [ "$provider" != anthropic ]; then
+    operations="$(jq -n --argjson w "$(warrant "$provider" "$expires" repositories.write)" \
+      --argjson d "$(warrant "$provider" "$expires" repositories.delete)" \
+      '[{operation: "repositories.write", warrant: $w}, {operation: "repositories.delete", warrant: $d}]')"
+  fi
+  jq -n --argjson w "$(warrant "$provider" "$expires")" --argjson ops "$operations" \
+    '{warrant: $w, account: "user/conn", cost: 3, operations: $ops}'
+}
 create() { # URL PROVIDER
   api POST /v0/sessions "$(jq -n --arg url "$1" --argjson rc "$(creds "$2")" --argjson mc "$(creds anthropic)" \
     '{source: {url: $url, branch: "main", path: "lean", credentials: $rc},
@@ -120,7 +130,14 @@ git -C "$work/github.git" show main:lean/Demo/Hello.lean | grep -q 'Demo.hello' 
 if git -C "$work/github.git" cat-file -e main:lean/Old.txt 2>/dev/null; then fail "the deleted file is gone"; fi
 [ "$(git -C "$work/github.git" ls-tree main lean/run.sh | cut -d' ' -f1)" = "100755" ] || fail "the executable bit"
 git -C "$work/github.git" show main:lean/Demo.lean | grep -q 'answer' || fail "untouched files are kept"
-pass "GitHub: blobs, tree, commit and fast-forward make the right commit"
+pass "GitHub: native compare-and-publish makes the right commit"
+repositories="$(jq -c 'select(.provider == "github")' "$work/egress.log")"
+jq -e -s 'all(.[]; .call.kind == "connector" and .action == .call.operation and
+  (.call | has("url") | not) and (.call | has("headers") | not)) and
+  any(.[]; .call.operation == "repositories.read") and
+  any(.[]; .call.operation == "repositories.write" and .call.resource == ["acme", "demo", "lean"])' \
+  <<<"$repositories" >/dev/null || fail "native repository envelopes: $repositories"
+pass "repository calls use named-operation warrants and a scoped publication target"
 expect "the status follows GitHub" 200 ".workspace.remoteHead == \"$new\"" "$(api GET "/v0/sessions/$gh")"
 
 # What went through liaison for the model.
@@ -131,7 +148,7 @@ jq -e '.cost == "3" and .call.kind == "connector" and .call.operation == "infere
 jq -e '.call | (has("headers") | not) and (has("url") | not)' <<<"$first" >/dev/null \
   || fail "no credential headers from lode"
 body1="$(jq -r .call.payload <<<"$first")"
-jq -e '.model == "claude-test" and (.tools | map(.name) | index("publish") != null) and (.system[0].text | test("lun"))
+jq -e '(has("model") | not) and (.tools | map(.name) | index("publish") != null) and (.system[0].text | test("lun"))
        and (.system[0].text | test("lean/"))' <<<"$body1" >/dev/null || fail "the first request: $body1"
 body2="$(jq -r .call.payload <<<"$(sed -n 2p <<<"$model_calls")")"
 jq -e '.messages[2].role == "user" and ([.messages[2].content[] | .tool_use_id] == ["toolu_1", "toolu_2"])' <<<"$body2" >/dev/null \

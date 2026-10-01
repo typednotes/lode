@@ -5,11 +5,10 @@ It checks the envelope lode sends (warrant, grant fields as strings, the
 call), and answers the calls a session makes as the real hosts would, backed
 by real git repositories:
 
-  * GitHub (https://api.github.com/repos/acme/demo/...): branches, tarball,
-    git/commits, git/blobs, git/trees, git/refs — over the bare repository
-    GITHUB_REPO, with git plumbing, so what lode publishes is a real commit;
-  * GitLab (https://gitlab.com/api/v4/projects/acme%2Fdemo/...): branches,
-    archive.tar.gz, commits with actions — over GITLAB_REPO;
+  * GitHub/GitLab native repositories.read: immutable branch, tree and file
+    views over GITHUB_REPO/GITLAB_REPO;
+  * native repositories.write: a scoped commit plan with an expected-head
+    compare-and-swap, implemented with real git plumbing;
   * Anthropic (https://api.anthropic.com/v1/messages): replies from the JSON
     list in MODEL_SCRIPT, in order; an entry with `_status` is answered with
     that status and `_headers` instead (a rate limit, say).
@@ -29,7 +28,6 @@ import sys
 import tempfile
 import threading
 import time
-import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT, GITHUB_REPO, GITLAB_REPO, MODEL_SCRIPT, LOG = sys.argv[1:6]
@@ -83,83 +81,57 @@ def fast_forward(repo, branch, new, old):
     return True
 
 
-def github(method, path, body):
-    prefix = "/repos/acme/demo"
-    if not path.startswith(prefix):
-        return answer(404, {"message": "Not Found"})
-    p = path[len(prefix):]
-    repo = GITHUB_REPO
-    if method == "GET" and p.startswith("/branches/"):
-        sha = head(repo, urllib.parse.unquote(p[len("/branches/"):]))
-        if not sha:
-            return answer(404, {"message": "Branch not found"})
-        return answer(200, {"name": "main", "commit": {"sha": sha}})
-    if method == "GET" and p.startswith("/tarball/"):
-        sha = p[len("/tarball/"):]
-        data = git(repo, "archive", "--format=tar.gz", f"--prefix=acme-demo-{sha[:7]}/", sha)
-        return answer(200, data)
-    if method == "GET" and p.startswith("/git/commits/"):
-        sha = p[len("/git/commits/"):]
-        tree = git(repo, "rev-parse", f"{sha}^{{tree}}").decode().strip()
-        return answer(200, {"sha": sha, "tree": {"sha": tree}})
-    if method == "POST" and p == "/git/blobs":
-        assert body["encoding"] == "base64"
-        sha = git(repo, "hash-object", "-w", "--stdin", input=base64.b64decode(body["content"]))
-        return answer(201, {"sha": sha.decode().strip()})
-    if method == "POST" and p == "/git/trees":
-        edits = [(e["path"], e["mode"], e["sha"]) for e in body["tree"]]
-        return answer(201, {"sha": write_tree(repo, body["base_tree"], edits)})
-    if method == "POST" and p == "/git/commits":
-        args = ["commit-tree", body["tree"], "-m", body["message"]]
-        for parent in body["parents"]:
-            args += ["-p", parent]
-        return answer(201, {"sha": git(repo, *args).decode().strip()})
-    if method == "PATCH" and p.startswith("/git/refs/heads/"):
-        branch = urllib.parse.unquote(p[len("/git/refs/heads/"):])
-        assert body["force"] is False
-        new = body["sha"]
-        old = head(repo, branch)
-        # A fast-forward: the new commit's parent is the current head.
-        parent = git(repo, "rev-parse", f"{new}^").decode().strip()
-        if parent != old or not fast_forward(repo, branch, new, old):
-            return answer(422, {"message": "Update is not a fast forward"})
-        return answer(200, {"object": {"sha": new}})
-    return answer(404, {"message": f"no mock for {method} {p}"})
-
-
-def gitlab(method, path, query, body):
-    prefix = "/api/v4/projects/acme%2Fdemo"
-    if not path.startswith(prefix):
-        return answer(404, {"message": "404 Project Not Found"})
-    p = path[len(prefix):]
-    repo = GITLAB_REPO
-    if method == "GET" and p.startswith("/repository/branches/"):
-        sha = head(repo, urllib.parse.unquote(p[len("/repository/branches/"):]))
-        if not sha:
-            return answer(404, {"message": "404 Branch Not Found"})
-        return answer(200, {"name": "main", "commit": {"id": sha}})
-    if method == "GET" and p == "/repository/archive.tar.gz":
-        sha = urllib.parse.parse_qs(query)["sha"][0]
-        return answer(200, git(repo, "archive", "--format=tar.gz", f"--prefix=demo-{sha}/", sha))
-    if method == "POST" and p == "/repository/commits":
-        branch = body["branch"]
-        old = head(repo, branch)
-        tree = git(repo, "rev-parse", f"{old}^{{tree}}").decode().strip()
-        edits = []
-        for a in body["actions"]:
-            if a["action"] == "delete":
-                edits.append((a["file_path"], None, None))
-            else:
-                assert a["encoding"] == "base64"
-                sha = git(repo, "hash-object", "-w", "--stdin",
-                          input=base64.b64decode(a["content"])).decode().strip()
-                mode = "100755" if a.get("execute_filemode") else "100644"
-                edits.append((a["file_path"], mode, sha))
-        new_tree = write_tree(repo, tree, edits)
-        new = git(repo, "commit-tree", new_tree, "-p", old, "-m", body["commit_message"]).decode().strip()
-        fast_forward(repo, branch, new, old)
-        return answer(201, {"id": new})
-    return answer(404, {"message": f"no mock for {method} {p}"})
+def repository(provider, call):
+    """Fixture native views/publication; production authority is tested separately."""
+    repo = GITHUB_REPO if provider == "github" else GITLAB_REPO
+    resource = call["resource"]
+    assert resource[:2] == ["acme", "demo"]
+    payload = json.loads(call["payload"])
+    if call["operation"] == "repositories.read":
+        ref = payload["ref"]
+        if payload.get("view") == "branch":
+            assert resource == ["acme", "demo"] and ref == "main"
+            sha = head(repo, ref)
+            key = "sha" if provider == "github" else "id"
+            return answer(200, {"commit": {key: sha}}) if sha else answer(404, {"message": "Branch not found"})
+        assert len(ref) == 40 and all(c in "0123456789abcdef" for c in ref)
+        if payload.get("view") == "tree":
+            assert resource == ["acme", "demo"]
+            entries = []
+            for row in git(repo, "ls-tree", "-rz", ref).split(b"\0"):
+                if not row:
+                    continue
+                info, path = row.decode().split("\t", 1)
+                mode, kind, sha = info.split()
+                entries.append({"path": path, "mode": mode, "type": kind, "sha": sha})
+            return answer(200, {"tree": entries, "truncated": False})
+        path = "/".join(resource[2:])
+        assert path and all(p not in ("", ".", "..") for p in resource[2:])
+        return answer(200, {"encoding": "base64", "content": base64.b64encode(git(repo, "show", f"{ref}:{path}")).decode()})
+    assert call["operation"] == "repositories.write"
+    assert resource == ["acme", "demo", "lean"]
+    assert payload["view"] == "commit" and payload["branch"] == "main"
+    old = payload["expectedHead"]
+    if head(repo, "main") != old:
+        return answer(409, {"message": "branch moved since expectedHead"})
+    edits = []
+    for change in payload["changes"]:
+        parts = change["resource"]
+        assert parts and all(p not in ("", ".", "..", ".git", ".lake") and "/" not in p for p in parts)
+        path = "/".join(resource[2:] + parts)
+        if change["delete"]:
+            assert change["mode"] == "000000" and change["contents"] is None
+            edits.append((path, None, None))
+        else:
+            assert change["mode"] in ("100644", "100755")
+            sha = git(repo, "hash-object", "-w", "--stdin", input=change["contents"].encode()).decode().strip()
+            edits.append((path, change["mode"], sha))
+    tree = git(repo, "rev-parse", f"{old}^{{tree}}").decode().strip()
+    new_tree = write_tree(repo, tree, edits)
+    new = git(repo, "commit-tree", new_tree, "-p", old, "-m", payload["message"]).decode().strip()
+    if not fast_forward(repo, "main", new, old):
+        return answer(409, {"message": "branch moved during publication"})
+    return answer(201, {"commit": new})
 
 
 def anthropic(method, path, body):
@@ -210,29 +182,22 @@ class Handler(BaseHTTPRequestHandler):
         call = req["call"]
         if call["account"].split("/")[-1] != req["resource"]:
             return self.reply(400, {"error": "malformed_warrant"})
-        if call["kind"] == "connector":
-            assert req["provider"] == "anthropic"
-            assert req["action"] == call["operation"] == "inference.generate"
-            assert call["resource"] == ["claude-test"]
-            assert "url" not in call and "headers" not in call
-            assert call["context"]["client"] == "typednotes-lode"
-            return self.reply(200, anthropic("POST", "/v1/messages", json.loads(call["payload"])))
-        if call["kind"] != "provider":
+        if call["kind"] != "connector":
             return self.reply(400, {"error": "malformed_warrant"})
-        for h in call.get("headers", {}):
-            if h.lower() in ("authorization", "x-api-key", "host", "content-length"):
-                return self.reply(400, {"error": "header_denied"})
-        url = urllib.parse.urlsplit(call["url"])
-        body = json.loads(call["body"]) if call.get("body") else None
         try:
-            if url.netloc == "api.github.com" and req["provider"] == "github":
-                out = github(call["method"], url.path, body)
-            elif url.netloc == "gitlab.com" and req["provider"] == "gitlab":
-                out = gitlab(call["method"], url.path, url.query, body)
-            elif url.netloc == "api.anthropic.com" and req["provider"] == "anthropic":
-                out = anthropic(call["method"], url.path, body)
+            assert req["action"] == call["operation"]
+            assert "url" not in call and "headers" not in call
+            capabilities = [c for c in req["warrant"]["caveats"] if c["kind"] == "capability"]
+            assert any(c["provider"] == req["provider"] and c["action"] == call["operation"] for c in capabilities)
+            if req["provider"] in ("github", "gitlab"):
+                out = repository(req["provider"], call)
+            elif req["provider"] == "anthropic":
+                assert call["operation"] == "inference.generate"
+                assert call["resource"] == ["claude-test"]
+                assert call["context"]["client"] == "typednotes-lode"
+                out = anthropic("POST", "/v1/messages", json.loads(call["payload"]))
             else:
-                return self.reply(403, {"error": "url_denied"})
+                return self.reply(403, {"error": "provider_denied"})
         except Exception as e:  # a bug in the mock or in lode's request
             out = answer(500, {"message": str(e)})
         self.reply(200, out)

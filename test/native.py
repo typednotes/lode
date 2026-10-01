@@ -21,7 +21,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
-TMP = Path("/var/folders/83/bq8tqpf57rv3ff7ftlnmh6k80000gp/T/opencode")
+TMP = Path(os.environ.get("LODE_TEST_TMP") or tempfile.gettempdir())
 CASES = [
     ("anthropic", "claude-test", "anthropic"),
     ("groq", "chat-test", "openai"),

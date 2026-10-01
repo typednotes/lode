@@ -115,6 +115,13 @@ python3 test/native.py .lake/build/bin/lode  # native APIs and writer policy, no
 test/lun.sh ../lun ../linen   # with the coordinated Lun/Linen source checkouts
 ```
 
+The liaison and native integration suites use the platform's temporary
+directory (`TMPDIR` on Unix, with `/tmp` as the shell fallback). Set
+`LODE_TEST_TMP` to an existing directory to override their scratch location.
+The mock liaison exercises native `repositories.read` views and scoped
+`repositories.write` commit plans with named-operation credentials, including
+immutable file materialization and expected-head publication races.
+
 ### Run
 
 ```sh
