@@ -312,12 +312,13 @@ without advancing `latest` or a shortened version alias. Main pushes publish no 
 
 [`lean_action_ci.yml`](https://github.com/typednotes/lode/blob/main/.github/workflows/lean_action_ci.yml)
 runs on pushes to `main`, pull requests targeting `main`, and manual dispatch.
-Push `main` and wait for CI on the release commit before pushing its version
-tag. The publisher's verification job has only `contents: read` and
+The user may push the release commit and its new version tag together:
+`git push origin main vX.Y.Z`. The publisher's verification job has only `contents: read` and
 `actions: read`; [`ci/require-main-ci.sh`](https://github.com/typednotes/lode/blob/main/ci/require-main-ci.sh)
 requires the actual checkout to match the tag's commit, that commit to be
 reachable from `origin/main`, and its latest **push-to-main** CI run to be
-completed/success. Missing, pending or failed latest runs block publication;
+completed/success. Missing/pending CI is polled for up to two hours; failed or
+cancelled runs, invalid evidence, API errors and wait timeouts block publication.
 PR/manual CI and another commit's result do not qualify. After verification,
 the image job checks out the verified SHA and uses `packages: write` to build
 and publish, without repeating the full CI suite on tags.

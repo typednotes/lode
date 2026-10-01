@@ -131,6 +131,12 @@ and paid-provider conformance.
 
 ## Git
 
+For a new release commit, the user can push main and its version tag together.
+The publisher waits up to two hours for that exact commit's latest push-to-main
+CI success; all existing main CI jobs remain required. Failed/cancelled CI,
+invalid evidence, API errors and timeout stop publication. Existing tags retain
+their original workflows and must not be moved to adopt this behavior.
+
 **Never run `git push` in this repo.** Commits are fine when asked for;
 pushing is always left to the user.
 
