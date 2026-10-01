@@ -17,7 +17,7 @@ require liaison from git "https://github.com/typednotes/liaison" @ "v0.6.0"
 require lun from git "https://github.com/typednotes/lun" @ "291ae06d8f947140654091442ed28a7acfb0d037"
 
 package lode where
-  version := v!"0.4.1"
+  version := v!"0.4.2"
   testDriver := "LodeTest"
 
 @[default_target]

@@ -2,7 +2,9 @@ name: Lean Action CI
 
 on:
   push:
+    branches: [main]
   pull_request:
+    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -11,6 +13,9 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
+      - name: Offline release gate regressions
+        shell: bash
+        run: bash ci/test-require-main-ci.sh
       # linen's native build dependencies (it builds its FFI as a dependency),
       # from linen's own list at the version lode requires.
       - uses: typednotes/linen/.github/actions/setup-native-deps@v1.10.0

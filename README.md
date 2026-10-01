@@ -21,24 +21,24 @@
 
 ---
 
-`lode` is the coding agent of [typednotes](https://github.com/typednotes/typednotes):
+`lode` is the coding agent of [typednotes](https://github.com/typednotes/typednotes/tree/main):
 an HTTP service that runs model-driven sessions over a branch of a git
-repository and writes the Lean 4 projects [`lun`](https://github.com/typednotes/lun)
+repository and writes the Lean 4 projects [`lun`](https://github.com/typednotes/lun/tree/main)
 builds and serves — modules implementing **functions** (each under a declared
 signature ending in linen's `Eff`), **graphs** wiring them, and the `lun.json`
 declaring both. A session is done when lun builds the published commit and the
 functions and graphs answer as intended.
 
-This documentation describes the coordinated **Lode 0.4.1 / Lun 0.3.0 /
-Typednotes 0.7.0 / Linen 1.10.0 / Liaison 0.6.0** release. Package locks and
+This documentation describes the coordinated **Lode 0.4.2 / Lun 0.3.0 /
+Typednotes 0.7.2 / Linen 1.10.0 / Liaison 0.6.0** release. Package locks and
 runtime/image defaults use this set; local release tags still require publication.
 
 lode holds no third-party credential: it reaches the repository (GitHub,
 GitLab) and supported generative models using Messages, Chat Completions,
-Responses, Gemini or Radius Pi/SSE through [`liaison`](https://github.com/typednotes/liaison), with
+Responses, Gemini or Radius Pi/SSE through [`liaison`](https://github.com/typednotes/liaison/tree/main), with
 warrants the typednotes app mints for each connection, in liaison's own wire
 format (`Liaison.Wire`). It is built on
-[`linen`](https://github.com/typednotes/linen) and runs as a container.
+[`linen`](https://github.com/typednotes/linen/tree/main) and runs as a container.
 
 ```
  user / typednotes app ──HTTP──▶ lode ──(warrant)──▶ liaison ──▶ GitHub / GitLab              open, publish
@@ -68,7 +68,7 @@ format (`Liaison.Wire`). It is built on
 - **Enforced writer permissions** — a launch `tools` allowlist is intersected
   with the selected agent for both advertising and execution; later updates
   may only narrow it. Execution consumes Lean permission witnesses. See
-  [native writer integration](docs/native-writer.md) for the app/broker contract,
+  [native writer integration](https://github.com/typednotes/lode/blob/main/docs/native-writer.md) for the app/broker contract,
   proofs, verification and trusted boundaries. The app forwards organization
   tool settings at launch and applies monotonic narrowing to live sessions.
 
@@ -132,7 +132,7 @@ LODE_WORKDIR=/tmp/lode LODE_TOKEN=... \
 ```
 
 Needs `git`, `bash`, `elan`/`lake` and linen's native build
-dependencies on the `PATH` (see the `Dockerfile`).
+dependencies on the `PATH` (see the [`Dockerfile`](https://github.com/typednotes/lode/blob/main/Dockerfile)).
 
 Then open a session and give it a task:
 
@@ -186,7 +186,7 @@ naming the commit, the lun build and the services.
 | `lun_call` | call a function, or run a graph once, of the latest ready build |
 
 The model's `lun_call` body is input-only. The authenticated app can attach a
-[bounded Eff execution context](docs/runtime-bridge.md) at session launch, with
+[bounded Eff execution context](https://github.com/typednotes/lode/blob/main/docs/runtime-bridge.md) at session launch, with
 actor/graph bindings and fresh operation grants. Trials then use the same compiled
 DB/vault/HTTP/files/connector interpreters as the app. Refreshes only narrow;
 public ceilings survive restart, operation warrants do not.
@@ -273,7 +273,7 @@ tools; omission keeps the full standalone preset, and invalid/unknown tool
 restrictions are refused. Current policy and its immutable launch ceiling
 survive restart. Full native wire shapes, verified app provisioning and trusted
 boundaries are in
-[docs/native-writer.md](docs/native-writer.md).
+[docs/native-writer.md](https://github.com/typednotes/lode/blob/main/docs/native-writer.md).
 
 ### The log
 
@@ -304,12 +304,29 @@ isError}]`), `compaction` (`summary`, `firstKept`), `event` (`kind`:
 
 ## Docker
 
-Images are published to `ghcr.io/typednotes/lode` — `edge` from `main`, and
-`latest`, `X.Y.Z` and `X.Y` from release tags. The image carries the Lean
-toolchain and linen (`LINEN_REF`, coordinated target `v1.10.0`) pre-built in the package
+Images are published to `ghcr.io/typednotes/lode` only on version tags by
+[`docker-publish.yml`](https://github.com/typednotes/lode/blob/main/.github/workflows/docker-publish.yml).
+Stable `vX.Y.Z` tags publish `X.Y.Z`, `X.Y` and automatic `latest` through
+Docker metadata's semver rules. Prereleases publish their full version only,
+without advancing `latest` or a shortened version alias. Main pushes publish no image.
+
+[`lean_action_ci.yml`](https://github.com/typednotes/lode/blob/main/.github/workflows/lean_action_ci.yml)
+runs on pushes to `main`, pull requests targeting `main`, and manual dispatch.
+Push `main` and wait for CI on the release commit before pushing its version
+tag. The publisher's verification job has only `contents: read` and
+`actions: read`; [`ci/require-main-ci.sh`](https://github.com/typednotes/lode/blob/main/ci/require-main-ci.sh)
+requires the actual checkout to match the tag's commit, that commit to be
+reachable from `origin/main`, and its latest **push-to-main** CI run to be
+completed/success. Missing, pending or failed latest runs block publication;
+PR/manual CI and another commit's result do not qualify. After verification,
+the image job checks out the verified SHA and uses `packages: write` to build
+and publish, without repeating the full CI suite on tags.
+
+The image carries the Lean toolchain and linen
+(`LINEN_REF`, coordinated target `v1.10.0`) pre-built in the package
 cache, so a workspace locked to that revision does not rebuild linen.
 
-Use Lode `0.4.1` with Lun `0.3.0`, Liaison `0.6.0` and
+Use Lode `0.4.2` with Lun `0.3.0`, Liaison `0.6.0` and
 Linen `1.10.0`. Historical `0.1.x` cell/DAG deployments do not implement this
 native authority contract. Registry/tag publication is release-parent-owned.
 
@@ -318,7 +335,7 @@ native authority contract. Registry/tag publication is release-parent-owned.
 The package is public: no `docker login` is needed.
 
 ```sh
-docker pull ghcr.io/typednotes/lode:edge
+docker pull ghcr.io/typednotes/lode:0.4.2
 ```
 
 lode is an internal service: typednotes calls it, and it calls liaison and
@@ -336,7 +353,7 @@ docker run -d --name lode --restart unless-stopped \
   -e LODE_TOKEN="$LODE_TOKEN" \
   -e LODE_LIAISON_URL=http://liaison:8080 \
   -e LODE_LUN_URL=http://lun:8080 -e LODE_LUN_TOKEN=... \
-  ghcr.io/typednotes/lode:edge
+  ghcr.io/typednotes/lode:0.4.2
 ```
 
 Give typednotes the same `LODE_TOKEN` (it sends `Authorization: Bearer …`).
@@ -381,7 +398,7 @@ and a model key sent directly to the provider):
 docker run --rm -p 127.0.0.1:8080:8080 -v lode:/var/lib/lode \
   -e LODE_TOKEN=dev \
   -e LODE_MODEL_NAME=claude-sonnet-4-5 -e LODE_MODEL_API_KEY="$ANTHROPIC_API_KEY" \
-  ghcr.io/typednotes/lode:edge
+  ghcr.io/typednotes/lode:0.4.2
 ```
 
 ### Building the image
@@ -422,9 +439,14 @@ parser.
 
 ## Project status
 
+The **0.4.2 release** adds main/PR-only CI and exact-commit gated tag publication,
+with living documentation links to GitHub main. Its runtime implementation and
+dependency pins are unchanged from 0.4.1; see
+[release notes](https://github.com/typednotes/lode/blob/v0.4.2/docs/release-0.4.2.md).
+
 The **0.4.1 release** includes the green main's portable CI scratch paths and
 native repository fixtures, omitted from the earlier v0.4.0 tag. See
-[release notes](docs/release-0.4.1.md). The pipeline passes with the actual app, compiled
+[release notes](https://github.com/typednotes/lode/blob/v0.4.1/docs/release-0.4.1.md). The pipeline passes with the actual app, compiled
 Lode, real credential broker, disposable local Git, and compiled Lun, including
 tool execution, publication/adoption and denied operations. Supporting suites
 pass **101 app API tests**, **24 browser groups**, **655 real broker HTTP cases**
@@ -439,8 +461,8 @@ Lakefiles, filesystem/transport FFI and container isolation remain trusted
 boundaries. The dedicated `lsp` tool and proof-bounded Eff trial bridge are
 verified by 63 LSP dispatcher calls and seven real runtime bridge groups.
 There is no unrestricted writer web-fetch fallback. See
-[`AGENTS.md`](AGENTS.md) and [native writer integration](docs/native-writer.md).
+[`AGENTS.md`](https://github.com/typednotes/lode/blob/main/AGENTS.md) and [native writer integration](https://github.com/typednotes/lode/blob/main/docs/native-writer.md).
 
 ## License
 
-Licensed under the [Apache License, Version 2.0](LICENSE).
+Licensed under the [Apache License, Version 2.0](https://github.com/typednotes/lode/blob/main/LICENSE).
