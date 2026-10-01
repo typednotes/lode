@@ -8,7 +8,7 @@ git repository and writes the Lean projects `lun` builds and serves
 has no `cells`/`dags` aliases, and neither has lode). lode is the writer; lun is the runner — do not confuse
 the two. See `README.md` for the API and the design.
 
-Coordinated release set: **Lode 0.4.0 / Lun 0.3.0 / Typednotes 0.7.0 /
+Coordinated release set: **Lode 0.4.1 / Lun 0.3.0 / Typednotes 0.7.0 /
 Linen 1.10.0 / Liaison 0.6.0**. Package locks, image defaults and new-project
 defaults use this set. Publishing local release tags and deploying remain the
 user's actions.

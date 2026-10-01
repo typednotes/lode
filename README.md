@@ -29,7 +29,7 @@ signature ending in linen's `Eff`), **graphs** wiring them, and the `lun.json`
 declaring both. A session is done when lun builds the published commit and the
 functions and graphs answer as intended.
 
-This documentation describes the coordinated **Lode 0.4.0 / Lun 0.3.0 /
+This documentation describes the coordinated **Lode 0.4.1 / Lun 0.3.0 /
 Typednotes 0.7.0 / Linen 1.10.0 / Liaison 0.6.0** release. Package locks and
 runtime/image defaults use this set; local release tags still require publication.
 
@@ -309,7 +309,7 @@ Images are published to `ghcr.io/typednotes/lode` — `edge` from `main`, and
 toolchain and linen (`LINEN_REF`, coordinated target `v1.10.0`) pre-built in the package
 cache, so a workspace locked to that revision does not rebuild linen.
 
-Use Lode `0.4.0` with Lun `0.3.0`, Liaison `0.6.0` and
+Use Lode `0.4.1` with Lun `0.3.0`, Liaison `0.6.0` and
 Linen `1.10.0`. Historical `0.1.x` cell/DAG deployments do not implement this
 native authority contract. Registry/tag publication is release-parent-owned.
 
@@ -422,7 +422,9 @@ parser.
 
 ## Project status
 
-The **0.4.0 release** pipeline passes with the actual app, compiled
+The **0.4.1 release** includes the green main's portable CI scratch paths and
+native repository fixtures, omitted from the earlier v0.4.0 tag. See
+[release notes](docs/release-0.4.1.md). The pipeline passes with the actual app, compiled
 Lode, real credential broker, disposable local Git, and compiled Lun, including
 tool execution, publication/adoption and denied operations. Supporting suites
 pass **101 app API tests**, **24 browser groups**, **655 real broker HTTP cases**

@@ -6,7 +6,7 @@ attachment are app-owned lifecycle operations. They must keep the declared
 signature, connection identities and execution ceilings rather than giving
 generated code a broader effect row.
 
-Coordinated release set: **Lode 0.4.0, Lun 0.3.0, Typednotes 0.7.0,
+Coordinated release set: **Lode 0.4.1, Lun 0.3.0, Typednotes 0.7.0,
 Linen 1.10.0 and Liaison 0.6.0**. Package locks and runtime/image defaults use
 this set. Local release tags require publication before deployment.
 

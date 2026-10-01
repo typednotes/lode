@@ -124,7 +124,7 @@ narrowing functions; no new release tag is required. Rebuild/deploy app, Lode an
 the coordinated bounded Lun together. Old writer sessions without a launch
 execution ceiling must be replaced by a newly authenticated app launch.
 
-Deployment release pair: **Lode v0.4.0 and Typednotes v0.7.0**. Lun v0.3.0,
+Deployment release pair: **Lode v0.4.1 and Typednotes v0.7.0**. Lun v0.3.0,
 Liaison v0.6.0 and Linen v1.10.0 remain the published runtime/SDK dependencies.
 Push and verify the Lode release before publishing the app release; deploy the
 pair after both images and CI checks pass. See the app's `docs/push-order.md`.
