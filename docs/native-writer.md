@@ -6,7 +6,7 @@ attachment are app-owned lifecycle operations. They must keep the declared
 signature, connection identities and execution ceilings rather than giving
 generated code a broader effect row.
 
-Coordinated release set: **Lode 0.3.0, Lun 0.3.0, Typednotes 0.6.0,
+Coordinated release set: **Lode 0.4.0, Lun 0.3.0, Typednotes 0.7.0,
 Linen 1.10.0 and Liaison 0.6.0**. Package locks and runtime/image defaults use
 this set. Local release tags require publication before deployment.
 
@@ -258,14 +258,15 @@ python3 scripts/test_native_connectors.py --temp-root "$APPROVED_TEMP_ROOT" \
 
 It passes app → compiled Lode → real broker → local Git → compiled Lun generation,
 tool dispatch, check, scope-checked publication and adoption, plus denial cases.
-Related verification passes **99 app API tests**, **24 browser groups** and
+Related verification passes **101 app API tests**, **24 browser groups** and
 **69 compiled-runtime cases**. Provider APIs/model replies are controlled fixtures;
 these results do not measure paid-provider conformance, OAuth refresh or real-model
 implementation reliability. Build/container isolation, approved libraries,
 filesystem/zlib/socket/TLS FFI, broker cryptography/ledger and remote ref/API
 correspondence remain explicit trusted boundaries. Linux/container execution is
-not claimed by these local macOS checks. LSP and a general web-fetch writer tool
-remain unimplemented.
+not claimed by these local macOS checks. The new [LSP tool](lsp.md) passes 63
+actual dispatcher calls; [caller-owned Eff trials](runtime-bridge.md) pass seven
+real bridge groups. There is no unrestricted web-fetch writer fallback.
 
 Protocol references audited: [OpenAI stateless reasoning](https://developers.openai.com/api/docs/guides/reasoning),
 [OpenCode Go client requirements](https://opencode.ai/docs/go/), and Pi's

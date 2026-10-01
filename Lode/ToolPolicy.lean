@@ -6,16 +6,16 @@ namespace Lode.Tools
 
 /-- Unknown writer operations cannot enter a validated policy. -/
 inductive Operation where
-  | read | ls | grep | write | edit | bash | todo | check | publish | lunBuild | lunCall
+  | read | ls | grep | write | edit | bash | todo | check | lsp | publish | lunBuild | lunCall
   deriving DecidableEq, Repr
 
 def Operation.name : Operation → String
   | .read => "read" | .ls => "ls" | .grep => "grep" | .write => "write"
   | .edit => "edit" | .bash => "bash" | .todo => "todo" | .check => "check"
-  | .publish => "publish" | .lunBuild => "lun_build" | .lunCall => "lun_call"
+  | .lsp => "lsp" | .publish => "publish" | .lunBuild => "lun_build" | .lunCall => "lun_call"
 
 def Operation.all : List Operation :=
-  [.read, .ls, .grep, .write, .edit, .bash, .todo, .check, .publish, .lunBuild, .lunCall]
+  [.read, .ls, .grep, .write, .edit, .bash, .todo, .check, .lsp, .publish, .lunBuild, .lunCall]
 
 def Operation.parse (name : String) : Except String Operation :=
   match Operation.all.find? (·.name == name) with

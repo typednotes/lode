@@ -13,8 +13,11 @@ require linen from git "https://github.com/typednotes/linen" @ "v1.10.0"
 -- in lun).
 require liaison from git "https://github.com/typednotes/liaison" @ "v0.6.0"
 
+-- Reuse Lun's execution projection/refresh witnesses, not a second policy model.
+require lun from git "https://github.com/typednotes/lun" @ "291ae06d8f947140654091442ed28a7acfb0d037"
+
 package lode where
-  version := v!"0.3.0"
+  version := v!"0.4.0"
   testDriver := "LodeTest"
 
 @[default_target]

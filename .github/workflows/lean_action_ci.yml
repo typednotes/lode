@@ -7,7 +7,8 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
       # linen's native build dependencies (it builds its FFI as a dependency),
@@ -20,6 +21,8 @@ jobs:
         with:
           test: false
       - run: lake test
+      - name: Real Lean language-server and bounded dispatcher regressions
+        run: python3 test/lsp.py
       # A real agent loop over a real repository, with a scripted model.
       - run: test/e2e.sh
       # The GitHub/GitLab and model paths, against a mock liaison.
@@ -29,7 +32,8 @@ jobs:
   # `Control.Reactive`), with a linen checkout for the test project's path
   # dependency, both next to lode, as `test/lun.sh` expects.
   lun:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
         with:

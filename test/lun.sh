@@ -20,7 +20,7 @@ lun_dir="$(cd "${1:-$root/../lun}" && pwd)"
 linen="$(cd "${2:-$root/../linen}" && pwd)"
 free_port() { python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])'; }
 port="$(free_port)"; lun_port="$(free_port)"
-work="$(mktemp -d /tmp/lode-lun.XXXXXX)"
+work="$(mktemp -d "${TMPDIR:-/tmp}/lode-lun.XXXXXX")"
 base="http://127.0.0.1:$port"
 
 fail() { echo "FAIL: $*" >&2; echo "(work dir: $work)" >&2; exit 1; }
@@ -58,6 +58,9 @@ def add (a b : Nat) : Eff [Trace.Trace] Nat := do
   Trace.trace s!"adding {a} and {b}"
   pure (a + b)
 
+/-- A pure sum for a graph run without caller-supplied effect authority. -/
+def pureAdd (a b : Nat) : Eff [] Nat := pure (a + b)
+
 /-- A constant source. -/
 def seed : Unit → Eff [] Nat := fun _ => pure 10
 
@@ -66,9 +69,10 @@ LEAN
 lun_json() { # SIGNATURE-OF-DOUBLE
   jq -n --arg sig "$1" '{open: ["Demo"],
     functions: [{name: "double", module: "Demo.Math", function: "Demo.double", signature: $sig},
-            {name: "add", module: "Demo.Math", function: "Demo.add", signature: "Nat → Nat → Eff [Trace.Trace] Nat"},
+             {name: "add", module: "Demo.Math", function: "Demo.add", signature: "Nat → Nat → Eff [Trace.Trace] Nat"},
+             {name: "pureAdd", module: "Demo.Math", function: "Demo.pureAdd", signature: "Nat → Nat → Eff [] Nat"},
             {name: "seed", module: "Demo.Math", function: "Demo.seed", signature: "Unit → Eff [] Nat"}],
-    graphs: [{name: "main", program: "do\n  let x ← input \"x\" Nat\n  let s ← seed\n  let d ← double x\n  add d s"}]}'
+    graphs: [{name: "main", program: "do\n  let x ← input \"x\" Nat\n  let s ← seed\n  let d ← double x\n  pureAdd d s"}]}'
 }
 lun_json "String → Eff [] Nat" > "$seed/lean/lun.json"   # wrong on purpose: lode fixes it
 (cd "$seed/lean" && lake update >/dev/null 2>&1)
@@ -81,7 +85,9 @@ git clone -q --bare "$seed" "$work/remote.git"
 # ── lun and lode ────────────────────────────────────────────────────────────
 (cd "$lun_dir" && lake build lun >/dev/null)
 (cd "$root" && lake build lode >/dev/null)
-LUN_WORKDIR="$work/lun" LUN_PORT="$lun_port" LUN_ALLOW_LOCAL=1 LUN_TOKEN=luntoken LUN_ID_SALT=e2e \
+sdk="${LUN_LIAISON_SDK_PATH:-$lun_dir/.lake/packages/liaison}"
+[ -f "$sdk/Liaison/Wire.lean" ] || fail "Liaison SDK missing at $sdk; build lun or set LUN_LIAISON_SDK_PATH"
+LUN_WORKDIR="$work/lun" LUN_PORT="$lun_port" LUN_ALLOW_LOCAL=1 LUN_TOKEN=luntoken LUN_ID_SALT=e2e LUN_LIAISON_SDK_PATH="$sdk" \
   "$lun_dir/.lake/build/bin/lun" >"$work/lun.log" 2>&1 &
 lun_pid=$!
 LODE_WORKDIR="$work/lode" LODE_PORT="$port" LODE_ALLOW_LOCAL=1 LODE_TOKEN=secret \
@@ -127,11 +133,12 @@ jq -e '.[0] | .isError == true and (.content | test(": failed")) and (.content |
   || fail "the wrong signature is reported on the function: $(jq -r '.[0].content' <<<"$results")"
 pass "lun_build reports lun's diagnostics, attributed to the function"
 jq -e '.[2] | .isError == false and (.content | test("Published"))' <<<"$results" >/dev/null || fail "publish: $(jq -c '.[2]' <<<"$results")"
-jq -e '.[3] | (.content | test(": ready")) and (.content | test("functions: double, add, seed"))' <<<"$results" >/dev/null \
+jq -e '.[3] | (.content | test(": ready")) and (.content | test("functions: double, add, pureAdd, seed"))' <<<"$results" >/dev/null \
   || fail "the fixed build is ready: $(jq -r '.[3].content' <<<"$results")"
 pass "after a fix and a publish, the build is ready"
 jq -e '.[4].content | fromjson | .output == 42' <<<"$results" >/dev/null || fail "double: $(jq -c '.[4]' <<<"$results")"
-jq -e '.[5].content | fromjson | .output == 3 and (.log | test("adding 1 and 2"))' <<<"$results" >/dev/null || fail "add: $(jq -c '.[5]' <<<"$results")"
+jq -e '.[5] | .isError == true and (.content | fromjson | .error | test("permission denied: Trace"))' <<<"$results" >/dev/null || fail "an unwarranted effect must be reported as a tool error: $(jq -c '.[5]' <<<"$results")"
+pass "lun_call cannot mint effect authority; a denied Trace is an error result"
 jq -e '.[6].content | fromjson | .nodes[-1].output == 20' <<<"$results" >/dev/null || fail "the graph: $(jq -c '.[6]' <<<"$results")"
 pass "lun_call calls functions and runs the graph"
 r="$(api GET "/v0/sessions/$id")"

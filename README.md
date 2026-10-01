@@ -29,8 +29,8 @@ signature ending in linen's `Eff`), **graphs** wiring them, and the `lun.json`
 declaring both. A session is done when lun builds the published commit and the
 functions and graphs answer as intended.
 
-This documentation describes the coordinated **Lode 0.3.0 / Lun 0.3.0 /
-Typednotes 0.6.0 / Linen 1.10.0 / Liaison 0.6.0** release. Package locks and
+This documentation describes the coordinated **Lode 0.4.0 / Lun 0.3.0 /
+Typednotes 0.7.0 / Linen 1.10.0 / Liaison 0.6.0** release. Package locks and
 runtime/image defaults use this set; local release tags still require publication.
 
 lode holds no third-party credential: it reaches the repository (GitHub,
@@ -178,6 +178,12 @@ naming the commit, the lun build and the services.
 | `lun_build` | have lun build the published commit with `lun.json`; wait; report state, diagnostics, functions, graphs |
 | `lun_call` | call a function, or run a graph once, of the latest ready build |
 
+The model's `lun_call` body is input-only. The authenticated app can attach a
+[bounded Eff execution context](docs/runtime-bridge.md) at session launch, with
+actor/graph bindings and fresh operation grants. Trials then use the same compiled
+DB/vault/HTTP/files/connector interpreters as the app. Refreshes only narrow;
+public ceilings survive restart, operation warrants do not.
+
 Named file-tool paths are confined to the checkout; `.git` and `.lake` cannot be
 written through them. Allowed `bash`/Lake execution still relies on container
 isolation. The
@@ -296,7 +302,7 @@ Images are published to `ghcr.io/typednotes/lode` — `edge` from `main`, and
 toolchain and linen (`LINEN_REF`, coordinated target `v1.10.0`) pre-built in the package
 cache, so a workspace locked to that revision does not rebuild linen.
 
-Use the coordinated Lode/Lun `0.3.0` release line with Liaison `0.6.0` and
+Use Lode `0.4.0` with Lun `0.3.0`, Liaison `0.6.0` and
 Linen `1.10.0`. Historical `0.1.x` cell/DAG deployments do not implement this
 native authority contract. Registry/tag publication is release-parent-owned.
 
@@ -393,8 +399,8 @@ lode takes its shape from two agents that got it right:
 - **From [OpenCode](https://opencode.ai)**: a client/server split (the agent
   *is* an HTTP server with sessions and messages); **agents** with tool
   allowlists; a `todo` tool; compiler **diagnostics fed back after edits**
-  (whole-`lake build` compiler feedback); exact-string `edit`. A persistent Lean
-  LSP/hover/goals integration is not implemented.
+  (whole-`lake build` compiler feedback); exact-string `edit`; bounded Lean LSP
+  diagnostics, hover, goals, completion and definition through ephemeral workers.
 
 And from typednotes' service design: a loop that is
 **total by construction**, tool arguments **parsed into typed values** at the
@@ -409,10 +415,10 @@ parser.
 
 ## Project status
 
-The **0.3.0 release-preparation** pipeline passes with the actual app, compiled
+The **0.4.0 release** pipeline passes with the actual app, compiled
 Lode, real credential broker, disposable local Git, and compiled Lun, including
 tool execution, publication/adoption and denied operations. Supporting suites
-pass **99 app API tests**, **24 browser groups**, **655 real broker HTTP cases**
+pass **101 app API tests**, **24 browser groups**, **655 real broker HTTP cases**
 and **69 compiled-runtime cases**. Provider replies remain controlled fixtures;
 live paid-provider/OAuth conformance and real-model implementation reliability
 are unmeasured.
@@ -421,7 +427,9 @@ Warrants are refreshed by the caller; Lode does not mint them. Tool policies and
 credential identities are monotonic across refresh/restart. The Lean proofs
 bound named tool/native operations; arbitrary allowed shell commands, project
 Lakefiles, filesystem/transport FFI and container isolation remain trusted
-boundaries. No LSP or general writer web-fetch tool is implemented. See
+boundaries. The dedicated `lsp` tool and proof-bounded Eff trial bridge are
+verified by 63 LSP dispatcher calls and seven real runtime bridge groups.
+There is no unrestricted writer web-fetch fallback. See
 [`AGENTS.md`](AGENTS.md) and [native writer integration](docs/native-writer.md).
 
 ## License

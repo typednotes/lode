@@ -65,6 +65,12 @@ def authorized (cfg : Config) (req : Network.WebApp.Request) : Bool :=
     | some h => Crypto.ConstantTime.eqString h s!"Bearer {token}"
     | none => false
 
+/-- Runtime authority additionally consumes a proof of configured, authenticated
+    ingress. No-token standalone mode cannot manufacture such a witness. -/
+private def executionCaller (cfg : Config) (req : Network.WebApp.Request) : Option Runtime.AuthenticatedCaller :=
+  Runtime.AuthenticatedCaller.check? cfg.token
+    (((req.requestHeaders.find? (·.1 == Data.CI.mk' "Authorization")).map (·.2)).getD "")
+
 /-- A query parameter's value. -/
 def queryParam (req : Network.WebApp.Request) (name : String) : Option String :=
   (req.queryString.lookup name).join
@@ -84,6 +90,12 @@ private def create (r : Registry) (req : Network.WebApp.Request) : IO Network.We
   match SessionSpec.parse j r.cfg.defaultModel r.cfg.allowLocal with
   | .error e => return error 400 e
   | .ok spec =>
+    let execution ← match spec.execution with
+      | none => pure none
+      | some context =>
+        let some caller := executionCaller r.cfg req | return error 401 "trusted execution requires authenticated caller configuration"
+        pure (some (context.authenticate caller))
+    let spec := { spec with execution }
     let s ← try r.create spec
       catch e => return error 502 s!"opening the repository failed: {e}"
     if let some m := spec.message then let _ ← s.send m
@@ -100,7 +112,15 @@ private def message (s : Session) (req : Network.WebApp.Request) : IO Network.We
   let creds ← match m.credentials.mapM (·.check repo) with
   | .error e => return error 400 e
   | .ok creds => pure (creds.getD {})
-  match ← s.updateAccess creds m.tools m.agent with
+  let execution ← match m.execution.mapM Runtime.Context.parse with
+    | .error e => return error 400 e
+    | .ok execution => pure execution
+  let execution ← match execution with
+    | none => pure none
+    | some context =>
+      let some caller := executionCaller s.cfg req | return error 401 "trusted execution requires authenticated caller configuration"
+      pure (some (context.authenticate caller))
+  match ← s.updateAccess creds m.tools m.agent execution false with
   | .error e => return error (if e == "the agent cannot change during a run" then 409 else 400) e
   | .ok _ => pure ()
   let queued ← s.send m.text
@@ -157,6 +177,12 @@ def route (r : Registry) (req : Network.WebApp.Request) : IO Network.WebApp.Resp
         match CredentialSet.parse j (← s.info.get).source.repo with
         | .error e => return error 400 e
         | .ok c =>
+          let execution ← match c.execution with
+            | none => pure none
+            | some context =>
+              let some caller := executionCaller s.cfg req | return error 401 "trusted execution requires authenticated caller configuration"
+              pure (some (context.authenticate caller))
+          let c := { c with execution }
           match ← s.updateAccess c with
           | .error e => return error 400 e
           | .ok _ => return json 200 (← s.status)

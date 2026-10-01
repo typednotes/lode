@@ -35,6 +35,7 @@ import Lode.Liaison
 import Lode.Model
 import Lode.Workspace
 import Lode.Prompt
+import Lode.RuntimeContext
 
 namespace Lode
 
@@ -48,11 +49,14 @@ structure CredentialSet where
   model : Option Liaison.Credentials := none
   /-- What lun reads the repository with (defaults to `repo`). -/
   lun : Option Liaison.Credentials := none
+  /-- Trusted runtime grants, memory-only; public ceilings are stored separately. -/
+  execution : Option Runtime.Context := none
 
 /-- Later credentials replace earlier ones, field by field (warrants expire
     within minutes: a caller refreshes them). -/
 def CredentialSet.merge (old new : CredentialSet) : CredentialSet :=
-  { repo := new.repo <|> old.repo, model := new.model <|> old.model, lun := new.lun <|> old.lun }
+  { repo := new.repo <|> old.repo, model := new.model <|> old.model, lun := new.lun <|> old.lun,
+    execution := new.execution <|> old.execution }
 
 -- ── Requests, as JSON ───────────────────────────────────────────────────────
 
@@ -85,6 +89,7 @@ structure SessionRequest where
   agent : Option String := none
   message : Option String := none
   tools : Option Tools.Policy := none
+  execution : Option Json := none
   deriving FromJson
 
 /-- Fresh credentials, field by field (`PUT …/credentials`, or with a message). -/
@@ -92,6 +97,7 @@ structure CredentialsRefresh where
   repo : Option Liaison.CredentialsJson := none
   model : Option Liaison.CredentialsJson := none
   lun : Option Liaison.CredentialsJson := none
+  execution : Option Json := none
   deriving FromJson
 
 /-- `POST …/messages`. -/
@@ -100,6 +106,7 @@ structure MessageRequest where
   credentials : Option CredentialsRefresh := none
   agent : Option String := none
   tools : Option Tools.Policy := none
+  execution : Option Json := none
   deriving FromJson
 
 -- ── Checking them ───────────────────────────────────────────────────────────
@@ -112,6 +119,7 @@ structure SessionSpec where
   creds : CredentialSet
   message : Option String
   tools : Tools.Policy := Tools.Policy.all
+  execution : Option Runtime.Context := none
 
 /-- The providers a repository warrant may be for. -/
 def repoProviders (repo : System.Git.Repository) : Except String (List String) :=
@@ -127,7 +135,8 @@ private def repoCreds (c : Liaison.CredentialsJson) (ctx : String) (repo : Syste
 def CredentialsRefresh.check (r : CredentialsRefresh) (repo : System.Git.Repository) : Except String CredentialSet := do
   return { repo := ← r.repo.mapM (repoCreds · "credentials.repo" repo)
            model := ← r.model.mapM (Liaison.Credentials.ofJson · "credentials.model" Model.providers)
-           lun := ← r.lun.mapM (repoCreds · "credentials.lun" repo) }
+           lun := ← r.lun.mapM (repoCreds · "credentials.lun" repo)
+           execution := ← r.execution.mapM Runtime.Context.parse }
 
 /-- Parse a credentials refresh. -/
 def CredentialSet.parse (j : Json) (repo : System.Git.Repository) : Except String CredentialSet := do
@@ -147,6 +156,8 @@ def MessageRequest.parse (j : Json) : Except String MessageRequest := do
   if let .ok tools := j.getObjVal? "tools" then let _ ← Tools.Policy.parse tools
   if let .ok credentials := j.getObjVal? "credentials" then
     if (credentials.getObjVal? "tools").isOk then throw "credentials: tool policy updates belong on messages"
+    if (credentials.getObjVal? "execution").isOk then throw "message execution belongs at the top level"
+  let _ ← m.execution.mapM Runtime.Context.parse
   let _ ← checkText m.text "message.text"
   return m
 
@@ -178,10 +189,14 @@ def SessionSpec.parse (j : Json) (defaultModel : Option Model.Config) (allowLoca
   let agent := r.agent.getD "build"
   unless (Prompt.agent? agent).isSome do throw "agent: 'build' or 'plan'"
   let message ← r.message.mapM (checkText · "message")
+  let execution ← r.execution.mapM Runtime.Context.parse
+  if let some execution := execution then
+    let org ← (← execution.execution.getObjVal? "binding").getObjValAs? String "org_id"
+    unless orgs.all (· == org) do throw "execution and writer credentials belong to different organizations"
   return {
     source := { repo, branch := r.source.branch, path }, agent, model
     creds := { repo := sourceCreds, model := modelCreds, lun := lunCreds }, message
-    tools := r.tools.getD Tools.Policy.all }
+    tools := r.tools.getD Tools.Policy.all, execution }
 
 /-- Persisted connection identity, without warrant tags or credential material. -/
 structure CredentialBinding where

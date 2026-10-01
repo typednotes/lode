@@ -50,6 +50,14 @@ namespace LodeTests.Tools
 #guard (Args.parse "lun_call" "{\"kind\":\"graph\",\"name\":\"g\",\"body\":[1]}").toOption.isNone
 #guard (Args.parse "rm" "{}").toOption.isNone
 
+-- Runtime permission/decoder failures can use HTTP 200. The model must still
+-- receive an error result, while an ordinary output containing `error` is data.
+#guard runtimeCallFailed "{\"error\":\"organization permission denied: Trace\"}"
+#guard runtimeCallFailed "{\"error\":\"cannot decode input\"}"
+#guard !runtimeCallFailed "{\"output\":42}"
+#guard !runtimeCallFailed "{\"output\":{\"error\":\"ordinary data\"}}"
+#guard !runtimeCallFailed "{\"output\":42,\"error\":null}"
+
 -- ── read ────────────────────────────────────────────────────────────────────
 
 #guard numberLines "a\nb\nc\n" 1 2000 == "1\ta\n2\tb\n3\tc"

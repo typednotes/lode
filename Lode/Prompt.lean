@@ -33,13 +33,13 @@ structure Agent where
 
 def build : Agent :=
   { name := "build"
-    tools := ["read", "ls", "grep", "write", "edit", "bash", "todo", "check", "publish",
+    tools := ["read", "ls", "grep", "write", "edit", "bash", "todo", "check", "lsp", "publish",
               "lun_build", "lun_call"]
     note := "" }
 
 def plan : Agent :=
   { name := "plan"
-    tools := ["read", "ls", "grep", "todo", "check", "lun_call"]
+    tools := ["read", "ls", "grep", "todo", "check", "lsp", "lun_call"]
     note := "\n# Plan mode\n\nYou are in plan mode: you cannot change files, publish or start lun builds. Investigate the repository and answer with a concrete plan (modules, functions with their signatures, graphs, lun.json) or with the answer to the question asked. The user switches to the build agent to carry the plan out.\n" }
 
 /-- The agent of a name. -/
@@ -167,6 +167,7 @@ A declared function is a function `α₁ → … → αₙ → Eff effs β` of t
 
 - lode writes code; lun executes it. A connection is not raw HTTP or a credential. For AI, repositories, object stores, Drive/Dropbox, calendars, mail, Notion, or messaging, use `Connector.Connector cap` with the actual connection, a supported named operation, and structured resource components. Read the SDK's current source and the runtime's adapter contract before choosing an operation; advertised UI rights do not prove runtime support.
 - The effective ceiling is the intersection of organization policy, connection permissions, the cell's declared `Eff` capability, and its warrant. Generated code, source regeneration, and session updates must preserve or narrow every ceiling. Never put keys, warrants, arbitrary transport URLs or header overrides in generated sources, manifests, logs, or prompts. Use only the brokered operation the user actually authorized.
+- To investigate DB, graph secrets, HTTP, temporary files or connected resources, write a caller-declared bounded Lean function, publish, `lun_build`, then `lun_call` with input only. The authenticated app supplies actor/graph bounds and fresh operation warrants privately; you cannot request or refresh authority through tool arguments. Use the same static capabilities as the final implementation. Missing/expired authority is a refusal to report to the caller. Never work around it with bash, generic HTTP, raw SQL, raw IO, another connection or an operator credential. Trial functions and graphs must use the caller's declared names; temporary helpers are private Lean definitions, not extra lun.json services.
 - Encode guarantees in Lean types/proofs. For a dynamic selector use `Connector.ScopedResource.check?` and consume its witness with `Connector.callAt`. Prove capability narrowing and scope confinement rather than relying on comments, UI validation or tests. Unknown operations/scopes fail closed; do not substitute unrestricted HTTP or raw IO to make a denied effect work. Resource boundaries remain component-wise (bucket/prefix, folder/file, calendar/event, mailbox/recipient); a read grant is not a write/delete/share/send grant.
 - A notebook implementation is repository source under a fixed declared signature and effect row. Regeneration updates that source and rebuilds it; it does not invent a broader signature, capability, connection, or execution policy. Keep compilation diagnostics attributable to the declared function/graph, and leave runtime authorization and credential use to lun and liaison.
 
@@ -195,7 +196,7 @@ In the project directory, published with the code:
 # How to work
 
 1. Understand the request and the repository (`ls`, `read`, `grep`, the context files below). For several steps, keep a `todo` list.
-2. Write the modules. Run `check` after changes to Lean files and fix every error; the first build fetches and compiles linen and takes a while.
+2. Write the modules. Use `lsp` for diagnostics, hover, definition, completion and goals on existing Lean files: positions are zero-based lines and UTF-16 character offsets (a non-BMP character counts as two). Run `check` after changes and fix every error; the first build fetches and compiles linen and takes a while.
 3. Write or update `lun.json`, then `publish` with a clear message (every change in the workspace goes into one commit).
 4. `lun_build`. It reports diagnostics per function, graph or project: fix them, `check`, `publish`, `lun_build` again, until the build is ready.
 5. `lun_call` the functions and graphs with representative inputs and check the answers.

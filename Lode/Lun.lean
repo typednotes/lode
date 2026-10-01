@@ -35,6 +35,7 @@ import Lode.Liaison
 import Lode.Http
 import Lode.Validate
 import Lode.Workspace
+import Lode.RuntimeContext
 
 namespace Lode.Lun
 
@@ -191,9 +192,9 @@ def build (cfg : Config) (request : Json) (abort : IO.Ref Bool) : IO Status := d
 
 /-- Call a function (`kind = "function"`) or run a graph (`kind = "graph"`)
     of a ready build; returns lun's HTTP status and answer. -/
-def call (cfg : Config) (id kind name : String) (body : Json) : IO (Nat × String) := do
-  let a ← Http.request .POST s!"{base cfg}/v0/builds/{id}/{kind}s/{name}" (headers cfg)
-    (some body.compress) cfg.callTimeoutMs
+def call (cfg : Config) (id : String) (request : Runtime.Call) : IO (Nat × String) := do
+  let a ← Http.request .POST s!"{base cfg}/v0/builds/{id}/{request.kind}s/{request.name}" (headers cfg)
+    (some request.body.compress) cfg.callTimeoutMs
   return (Http.status a, Http.text a)
 
 -- ── For the model ───────────────────────────────────────────────────────────

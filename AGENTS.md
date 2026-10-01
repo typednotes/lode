@@ -8,7 +8,7 @@ git repository and writes the Lean projects `lun` builds and serves
 has no `cells`/`dags` aliases, and neither has lode). lode is the writer; lun is the runner — do not confuse
 the two. See `README.md` for the API and the design.
 
-Coordinated release set: **Lode 0.3.0 / Lun 0.3.0 / Typednotes 0.6.0 /
+Coordinated release set: **Lode 0.4.0 / Lun 0.3.0 / Typednotes 0.7.0 /
 Linen 1.10.0 / Liaison 0.6.0**. Package locks, image defaults and new-project
 defaults use this set. Publishing local release tags and deploying remain the
 user's actions.
@@ -203,5 +203,8 @@ pushing is always left to the user.
   graph; the prompt says so and asks for that logic to go into functions.
 - **The container image has not been built here**; the Linux link is
   unverified (lode's own link was verified on macOS).
-- **No LSP or web-fetch writer tool:** feedback remains `lake build` diagnostics.
-  Neither is implemented by the native connector work.
+- **Bounded LSP and Eff trials are implemented:** `lsp` uses ephemeral actual
+  Lean workers with typed document/method/location bounds; `lun_call` consumes
+  authenticated, launch/current-narrowed app authority. See `docs/lsp.md` and
+  `docs/runtime-bridge.md` for proofs, real tests and trusted boundaries. There
+  is no unrestricted web-fetch or model-chosen execution-authority fallback.

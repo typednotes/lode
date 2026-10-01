@@ -91,6 +91,8 @@ structure Meta where
   tools : Tools.Policy := Tools.Policy.all
   toolCeiling : Option Tools.Policy := none
   credentialBindings : CredentialBindings := {}
+  executionCeiling : Option Runtime.Bounds := none
+  executionBounds : Option Runtime.Bounds := none
   workspace : Workspace.State
   lastBuild : Option String := none
   todos : Array Tools.Todo := #[]
@@ -202,9 +204,10 @@ def Session.create (cfg : Config) (spec : SessionSpec) : IO Session := do
     let m : Meta := {
       id, created := ← nowMs, source := spec.source, agent := spec.agent
       model := spec.model, workspace := st, tools := spec.tools
-      toolCeiling := some spec.tools, credentialBindings := CredentialBindings.ofCredentials spec.creds }
+      toolCeiling := some spec.tools, credentialBindings := CredentialBindings.ofCredentials spec.creds
+      executionCeiling := spec.execution.map (·.bounds), executionBounds := spec.execution.map (·.bounds) }
     let s ← make cfg m #[]
-    s.creds.set spec.creds
+    s.creds.set { spec.creds with execution := spec.execution }
     IO.FS.writeFile (logFile cfg id) ""
     s.saveMeta
     return s
@@ -231,6 +234,7 @@ structure CredentialsView where
   repo : Bool
   model : Bool
   lun : Bool
+  execution : Bool := false
   deriving ToJson
 
 /-- The session as `GET /v0/sessions/{id}` shows it. -/
@@ -245,6 +249,7 @@ structure StatusView where
   source : Workspace.Source
   agent : String
   tools : Tools.Policy
+  execution : Option Runtime.Bounds := none
   model : ModelView
   workspace : WorkspaceView
   lastBuild : Option String := none
@@ -264,11 +269,11 @@ def Session.status (s : Session) : IO Json := do
   return toJson ({
     id := m.id, created := m.created, state := if c.running then "running" else "idle"
     steps := if c.running then some steps else none, queued := c.queue.size
-    source := m.source, agent := m.agent, tools := m.tools
+    source := m.source, agent := m.agent, tools := m.tools, execution := m.executionBounds
     model := { api := m.model.api.toString, name := m.model.name, baseUrl := m.model.baseUrl }
     workspace := { remoteHead := m.workspace.remoteHead }, lastBuild := m.lastBuild
     todos := ← s.todos.get, usage := m.usage, entries := (← s.entries.get).size
-    credentials := { repo := cr.repo.isSome, model := cr.model.isSome, lun := cr.lun.isSome }
+    credentials := { repo := cr.repo.isSome, model := cr.model.isSome, lun := cr.lun.isSome, execution := cr.execution.isSome }
     error := m.error } : StatusView)
 
 -- ── What a run needs ────────────────────────────────────────────────────────
@@ -318,6 +323,13 @@ def Session.toolEnv (s : Session) : IO Tools.Env := do
       let m ← s.info.get
       let pending ← Workspace.changes s.wctx (checkoutDir s.cfg s.id) m.workspace
       let manifest ← IO.ofExcept (Lun.parseManifest (← publishedManifest s) |>.mapError IO.userError)
+      if let some bounds := m.executionBounds then
+        for function in manifest.functions do
+          let name ← IO.ofExcept ((function.getObjValAs? String "name").mapError IO.userError)
+          unless bounds.functions.contains name do throw (IO.userError "lun.json declares a function outside caller execution bounds")
+        for graph in manifest.graphs.getD #[] do
+          let name ← IO.ofExcept ((graph.getObjValAs? String "name").mapError IO.userError)
+          unless bounds.graphs.contains name do throw (IO.userError "lun.json declares a graph outside caller execution bounds")
       let cr ← s.creds.get
       let request := Lun.buildRequest m.source m.workspace.remoteHead (cr.lun <|> cr.repo) manifest
       let status ← Lun.build lun request s.abort
@@ -328,8 +340,18 @@ def Session.toolEnv (s : Session) : IO Tools.Env := do
       return (text, status.state != "ready")
     lunCall := fun kind name body => do
       let some lun := s.cfg.lun | throw (IO.userError "no lun is configured on this server (LODE_LUN_URL)")
-      let some id := (← s.info.get).lastBuild | throw (IO.userError "no lun build yet: run lun_build first")
-      let (code, text) ← Lun.call lun id kind name body
+      let m ← s.info.get
+      let some id := m.lastBuild | throw (IO.userError "no lun build yet: run lun_build first")
+      let context := (← s.creds.get).execution
+      let now := (← Liaison.nowSeconds).toUInt64
+      let request ← IO.ofExcept <| (do
+        match m.executionCeiling, m.executionBounds, context with
+        | some ceiling, some current, some context =>
+          let bounded ← Runtime.refresh ceiling current context false
+          bounded.call kind name body now s.cfg.token
+        | none, none, none => Runtime.Call.inputOnly kind name body
+        | _, _, _ => throw "execution credentials missing after restart; caller must refresh").mapError IO.userError
+      let (code, text) ← Lun.call lun id request
       let (text, _) := Tools.truncateHead text 400 20000
       if code == 200 then return text
       else throw (IO.userError s!"lun answered {code}: {text}")
@@ -502,7 +524,8 @@ def Session.running (s : Session) : IO Bool := return (← s.control.atomically 
 /-- Validate all changes before mutation. Credentials cannot alter the immutable
     ceiling. Policy transitions are serialized with tool execution. -/
 def Session.updateAccess (s : Session) (fresh : CredentialSet := {})
-    (tools : Option Tools.Policy := none) (agent : Option String := none) : IO (Except String Unit) :=
+    (tools : Option Tools.Policy := none) (agent : Option String := none)
+    (execution : Option Runtime.Context := none) (credentialsOnly : Bool := true) : IO (Except String Unit) :=
   s.toolPolicy.atomically (m := IO) do
     let old ← get
     let m ← s.info.get
@@ -512,13 +535,27 @@ def Session.updateAccess (s : Session) (fresh : CredentialSet := {})
     let bindings ← match m.credentialBindings.check m.model fresh with
       | .ok b => pure b
       | .error e => return .error e
+    let incoming := execution <|> fresh.execution
+    if let some context := incoming then
+      let org := ((context.execution.getObjVal? "binding") >>= (·.getObjValAs? String "org_id")).toOption
+      unless ([bindings.repo, bindings.model, bindings.lun].filterMap (fun b => b)).all (fun binding => org == some binding.orgId) do
+        return .error "execution and writer credentials belong to different organizations"
+    let bounds ← match incoming with
+      | none => pure m.executionBounds
+      | some context =>
+        let some ceiling := m.executionCeiling | return .error "execution authority cannot be added after launch"
+        let some current := m.executionBounds | return .error "missing persisted execution bounds"
+        match Runtime.refresh ceiling current context credentialsOnly with
+        | .error e => return .error e
+        | .ok bounded => pure (some bounded.context.bounds)
     if let some a := agent then
       unless (Prompt.agent? a).isSome do return .error "message.agent: 'build' or 'plan'"
       if ← s.running then return .error "the agent cannot change during a run"
     s.updateMeta fun mt =>
       { mt with tools := next.policy, toolCeiling := some s.toolCeiling
-                credentialBindings := bindings, agent := agent.getD mt.agent }
-    s.creds.modify (·.merge fresh)
+                credentialBindings := bindings, agent := agent.getD mt.agent
+                executionBounds := bounds }
+    s.creds.modify (·.merge { fresh with execution := incoming })
     set next
     return .ok ()
 

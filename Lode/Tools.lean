@@ -24,6 +24,7 @@ import Lode.Model
 import Lode.Process
 import Lode.Validate
 import Lode.ToolPolicy
+import Lode.Lsp
 import Linen.System.LakeLog
 import Linen.Control.Monad.Effect.FileSystem
 
@@ -206,6 +207,7 @@ inductive Args where
   | bash (command : String) (timeoutSec : Nat)
   | todo (items : Array Todo)
   | check (targets : Array String)
+  | lsp (request : Lode.Lsp.Arguments)
   | publish (message : String)
   | lunBuild
   | lunCall (name : String) (input : RuntimeInput)
@@ -214,7 +216,7 @@ inductive Args where
 def Args.operation : Args → Operation
   | .read .. => .read | .ls .. => .ls | .grep .. => .grep
   | .write .. => .write | .edit .. => .edit | .bash .. => .bash
-  | .todo .. => .todo | .check .. => .check | .publish .. => .publish
+  | .todo .. => .todo | .check .. => .check | .lsp .. => .lsp | .publish .. => .publish
   | .lunBuild => .lunBuild | .lunCall .. => .lunCall
 
 /-- Execution consumes evidence for both the launch/session ceiling and the
@@ -244,6 +246,9 @@ def validTarget (s : String) : Bool :=
 
 /-- Parse the arguments of tool `name`. -/
 def Args.parse (name : String) (arguments : String) : Except String Args := do
+  if name == "lsp" then
+    unless arguments.utf8ByteSize ≤ 4096 && Lode.Lsp.shallowJson arguments do
+      throw "lsp: invalid or oversized arguments"
   let j ← match Json.parse (if arguments.trimAscii.isEmpty then "{}" else arguments) with
     | .ok j@(.obj _) => pure j
     | .ok _ => throw "the arguments must be a JSON object"
@@ -282,6 +287,7 @@ def Args.parse (name : String) (arguments : String) : Except String Args := do
     let targets := a.targets.getD #[]
     for t in targets do check (validTarget t) s!"check.targets: '{t}' is not a lake target"
     return .check targets
+  | "lsp" => return .lsp (← Lode.Lsp.Arguments.parse j)
   | "publish" =>
     let a : PublishArgs ← fromJson? j
     let m := a.message
@@ -360,6 +366,13 @@ def specs : Array Model.ToolSpec := #[
     description := "Build the project with `lake build` and return its errors and warnings (file:line:col). Run it after changing Lean files, and until it is clean before publishing."
     schema := object [("targets", Json.mkObj [("type", "array"), ("items", prop "string" "A lake target"),
       ("description", "Targets to build (default: the default targets)")])] [] },
+  { name := "lsp"
+    description := "Read-only Lean language-server query of an existing workspace .lean file: hover, definition, completion, diagnostics or goals. Positions are zero-based lines and UTF-16 character offsets (not bytes/code points). Diagnostics takes no position. Uses a bounded ephemeral lake serve worker; definitions outside the checkout are omitted. No arbitrary RPC, commands, code actions or unsaved text."
+    schema := object [
+      ("operation", Json.mkObj [("type", "string"), ("enum", toJson #["hover", "definition", "completion", "diagnostics", "goals"])]),
+      ("path", prop "string" "Existing relative .lean document, without traversal or URI escapes"),
+      ("line", prop "integer" "Zero-based line (required except diagnostics)"),
+      ("character", prop "integer" "Zero-based UTF-16 code-unit offset (required except diagnostics)")] ["operation", "path"] },
   { name := "publish"
     description := "Commit every change in the workspace and push it to the shared repository's branch. Returns the new commit. lun builds only published commits."
     schema := object [("message", prop "string" "Commit message")] ["message"] },
@@ -483,8 +496,11 @@ def check (env : Env) (targets : Array String) : IO (String × Bool) := do
   else
     return (s!"The build failed: {errors.length} error(s), {warnings.length} warning(s).\n\n{listing}{more}", true)
 
-/-- Run one parsed tool call. Returns the result text and whether it is an
-    error. -/
+/-- Lun reports effect/decoder failures in HTTP-200 JSON envelopes. Preserve
+    their error status for the model without treating nested output data as errors. -/
+def runtimeCallFailed (text : String) : Bool :=
+  (Lean.Json.parse text >>= (·.getObjValAs? String "error")).isOk
+
 private def runUnchecked (env : Env) : Args → IO (String × Bool)
   | .read p offset limit => do
     let (_, file) ← IO.ofExcept (env.resolve p |>.mapError IO.userError)
@@ -556,12 +572,16 @@ private def runUnchecked (env : Env) : Args → IO (String × Bool)
     env.todos.set items
     return (renderTodos items, false)
   | .check targets => check env targets
+  | .lsp request => Lode.Lsp.run env.root env.projectDir env.abort env.checkTimeoutMs request
   | .publish message => do
     try return (← env.publish message, false) catch e => return (s!"publish failed: {e}", true)
   | .lunBuild => do
     try env.lunBuild catch e => return (s!"lun_build failed: {e}", true)
   | .lunCall name input => do
-    try return (← env.lunCall input.kind name input.body, false) catch e => return (s!"lun_call failed: {e}", true)
+    try
+      let text ← env.lunCall input.kind name input.body
+      return (text, runtimeCallFailed text)
+    catch e => return (s!"lun_call failed: {e}", true)
 
 /-- Run a tool call, if the agent has that tool; every failure becomes an
     error result for the model, never an exception. -/
