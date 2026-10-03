@@ -56,6 +56,7 @@ format (`Liaison.Wire`). It is built on
 
 - [Features](#features)
 - [Quick start](#quick-start)
+- [Native CLI](#native-cli)
 - [How a session goes](#how-a-session-goes)
 - [Tools](#tools)
 - [HTTP API](#http-api)
@@ -102,6 +103,9 @@ format (`Liaison.Wire`). It is built on
 - **Long sessions** — compaction by summary when the context fills up; an
   append-only log keeps everything.
 - **Two agents** — `build` does everything; `plan` reads, checks and proposes.
+- **Native stdio CLI** — `lode run` reads a task from stdin, writes assistant
+  answers to stdout and progress/tool results to stderr, and can resume persisted
+  sessions. It uses the same engine as the HTTP service.
 
 ## Quick start
 
@@ -116,6 +120,7 @@ lake build
 ```sh
 lake test          # unit tests (#guard): every parser and pure rule
 test/e2e.sh                   # a real agent loop (scripted model) over a real repository
+python3 test/cli.py           # native stdin/stdout/stderr, local Git/Lake, resume and failures
 test/liaison.sh               # GitHub, GitLab and the model through a mock liaison
 python3 test/native.py .lake/build/bin/lode  # native APIs and writer policy, no paid model
 test/lun.sh ../lun ../linen   # with the coordinated Lun/Linen source checkouts
@@ -140,6 +145,12 @@ LODE_WORKDIR=/tmp/lode LODE_TOKEN=... \
 Needs `git`, `bash`, `elan`/`lake` and linen's native build
 dependencies on the `PATH` (see the [`Dockerfile`](https://github.com/typednotes/lode/blob/main/Dockerfile)).
 
+For a **local Git repository with curl**, set `LODE_ALLOW_LOCAL=1`, use a
+`file:///absolute/path/to/repo.git` source and a writable `LODE_WORKDIR`.
+The [local testing guide](docs/local-testing.md) includes a complete no-key
+smoke test and real-model setup for both curl and the native CLI. Local runs
+work in a separate clone; a bare local repository supports `publish`.
+
 Then open a session and give it a task:
 
 ```sh
@@ -157,6 +168,44 @@ curl -s -X POST "localhost:8080/v0/sessions/$ID/messages" \
   -d '{"text":"Write a function that converts EUR to USD, and a graph summing two converted amounts."}'
 curl -s "localhost:8080/v0/sessions/$ID/messages?after=0&wait=30" -H "Authorization: Bearer $LODE_TOKEN"
 ```
+
+## Native CLI
+
+Build with `lake build lode`, then configure a direct model and pipe a task:
+
+```sh
+export LODE_MODEL_API=anthropic LODE_MODEL_NAME=claude-sonnet-4-5
+export LODE_MODEL_API_KEY="$ANTHROPIC_API_KEY"
+
+.lake/build/bin/lode run --repo /absolute/path/to/repo.git --branch main <<'TASK'
+Read the project, implement a small improvement, check it and publish it.
+TASK
+```
+
+`run` starts no HTTP server. It enables local mode and reads one UTF-8 task
+through EOF (at most 1 MB). Assistant answers go to **stdout**; tool-use
+narration, tool results, progress, the session ID and checkout path go to
+**stderr**. Redirect them independently with `>answer.txt 2>progress.log`.
+Exit status is `0` for a finished run, `1` for setup/run failure, and `2` for
+invalid arguments or stdin. A recoverable tool error does not end a run.
+
+- `--repo` accepts a local path, `file://` URL or public `https://` repository;
+  `--branch` defaults to `main`, `--path` to the repository root and `--agent`
+  to `build` (`plan` is also available).
+- `--config session.json` accepts the [session request](#creating-a-session)
+  shape, including `model`, `tools` and `buildContracts`; omit `message` and
+  supply it on stdin. Runtime execution grants require authenticated HTTP
+  ingress. `--config` and `--repo` are mutually exclusive.
+- `--resume ID` continues a persisted session with the next task on stdin.
+  Use the same `LODE_WORKDIR` and direct model configuration. It does not
+  accept launch flags; connection credentials remain memory-only.
+- CLI state defaults to `$HOME/.local/state/lode`; `LODE_WORKDIR` overrides
+  it. Each run uses `{workdir}/sessions/{id}/checkout`, not the source's
+  working tree. Do not share one state directory between concurrent processes.
+
+`.lake/build/bin/lode --help` shows usage. No arguments (or `serve`) starts
+the HTTP service as before. See [local testing](docs/local-testing.md) for
+copy-paste scripted CLI/curl tests and how to use your own repository.
 
 ## How a session goes
 
@@ -242,7 +291,7 @@ With `LODE_TOKEN` set, every route but `/_health` needs
 ```jsonc
 {
   "source": {
-    "url": "https://github.com/owner/repo",   // github.com, gitlab.com, or any https host (public, read-only)
+    "url": "https://github.com/owner/repo",   // or file:///absolute/path in local mode
     "branch": "main",                          // must exist; lode commits on it
     "path": "lean",                            // optional: the project directory
     "credentials": { "warrant": { … }, "account": "{user_id}/{connection_id}", // repositories.read
@@ -295,7 +344,7 @@ isError}]`), `compaction` (`summary`, `firstKept`), `event` (`kind`:
 | Variable | Default | |
 |---|---|---|
 | `LODE_PORT` | `8080` | |
-| `LODE_WORKDIR` | `/var/lib/lode` | sessions: `sessions/{id}/{session.json,log.jsonl,checkout/}` |
+| `LODE_WORKDIR` | `/var/lib/lode` (HTTP), `$HOME/.local/state/lode` (CLI) | sessions: `sessions/{id}/{session.json,log.jsonl,checkout/}` |
 | `LODE_TOKEN` | — | bearer token for the API; unset means unauthenticated (logged loudly) |
 | `LODE_LIAISON_URL` | — | liaison, for GitHub/GitLab repositories and models with credentials |
 | `LODE_LUN_URL`, `LODE_LUN_TOKEN` | — | lun, for `lun_build` / `lun_call` |
@@ -306,7 +355,7 @@ isError}]`), `compaction` (`summary`, `firstKept`), `event` (`kind`:
 | `LODE_MODEL_TIMEOUT` / `LODE_GIT_TIMEOUT` / `LODE_CHECK_TIMEOUT` | `600` / `600` / `1800` | seconds |
 | `LODE_PACKAGE_CACHE` | — | pre-built linen checkouts, `{cache}/linen/{rev}` |
 | `LODE_LINEN_REV` / `LODE_TOOLCHAIN` | `v1.10.0` / `leanprover/lean4:v4.34.0` | what new projects are told to use |
-| `LODE_ALLOW_LOCAL` | — | `1`: `file://` repositories and the `scripted` model. Tests only |
+| `LODE_ALLOW_LOCAL` | — | `1`: `file://` repositories, HTTP model endpoints and the `scripted` model for local development/testing; enabled automatically by `run` |
 
 ## Docker
 

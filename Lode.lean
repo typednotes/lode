@@ -14,3 +14,4 @@ import Lode.Compaction
 import Lode.Spec
 import Lode.Session
 import Lode.Server
+import Lode.Cli

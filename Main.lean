@@ -35,12 +35,17 @@ def defaultModel (allowLocal : Bool) : IO (Option Lode.Model.Config) := do
   | .ok c => return some c
   | .error e => throw (IO.userError s!"LODE_MODEL_*: {e}")
 
-/-- Entry point. Configuration comes from the environment (see README.md). -/
-def main : IO Unit := do
-  let port : UInt16 := match (← IO.getEnv "LODE_PORT").bind String.toNat? with
-    | some p => p.toUInt16
-    | none => 8080
-  let allowLocal := (← IO.getEnv "LODE_ALLOW_LOCAL") == some "1"
+/-- Shared environment configuration; terminal runs enable local mode and keep
+    state under the user's home unless `LODE_WORKDIR` is explicitly set. -/
+def configFromEnv (cli : Bool := false) : IO Lode.Config := do
+  let allowLocal := cli || (← IO.getEnv "LODE_ALLOW_LOCAL") == some "1"
+  let workdir ← match ← env? "LODE_WORKDIR" with
+    | some dir => pure dir
+    | none =>
+      if cli then do
+        let some home ← env? "HOME" | throw (IO.userError "set HOME or LODE_WORKDIR for CLI state")
+        pure s!"{home}/.local/state/lode"
+      else pure "/var/lib/lode"
   let lun ← match ← env? "LODE_LUN_URL" with
     | none => pure none
     | some url => pure (some
@@ -48,7 +53,7 @@ def main : IO Unit := do
           buildTimeoutMs := ← secondsEnv "LODE_LUN_BUILD_TIMEOUT" 3600
           callTimeoutMs := ← secondsEnv "LODE_LUN_CALL_TIMEOUT" 120 : Lode.Lun.Config })
   let cfg : Lode.Config :=
-    { workdir := (← env? "LODE_WORKDIR").getD "/var/lib/lode"
+    { workdir := workdir
       token := ← env? "LODE_TOKEN"
       liaisonUrl := ← env? "LODE_LIAISON_URL"
       lun
@@ -62,9 +67,35 @@ def main : IO Unit := do
       packageCache := (← env? "LODE_PACKAGE_CACHE").map System.FilePath.mk
       linenRev := (← env? "LODE_LINEN_REV").getD "v1.10.0"
       toolchain := (← env? "LODE_TOOLCHAIN").getD "leanprover/lean4:v4.34.0" }
+  return cfg
+
+/-- Start the HTTP service (also the no-argument behavior). -/
+def serve : IO Unit := do
+  let port : UInt16 := match (← IO.getEnv "LODE_PORT").bind String.toNat? with
+    | some p => p.toUInt16
+    | none => 8080
+  let cfg ← configFromEnv
   let registry ← Lode.Registry.new cfg
-  if allowLocal then IO.eprintln "lode: LOCAL MODE — file:// repositories and the scripted model accepted"
+  if cfg.allowLocal then IO.eprintln "lode: LOCAL MODE — file:// repositories and the scripted model accepted"
   if cfg.token.isNone then IO.eprintln "lode: LODE_TOKEN is not set — the API is unauthenticated"
   if cfg.lun.isNone then IO.eprintln "lode: LODE_LUN_URL is not set — lun_build and lun_call are unavailable"
   IO.println s!"lode listening on :{port}"
   Network.WebApp.Server.run port (Lode.application registry)
+
+/-- Dispatch native stdio runs or the HTTP service, keeping diagnostics off stdout. -/
+def main (args : List String) : IO UInt32 := do
+  try
+    match args with
+    | [] | ["serve"] => serve; return 0
+    | ["--help"] | ["-h"] | ["run", "--help"] | ["run", "-h"] =>
+      IO.print Lode.Cli.usage
+      return 0
+    | "run" :: rest =>
+      let opts ← match Lode.Cli.Options.parse rest with
+        | .ok opts => pure opts
+        | .error error => IO.eprintln s!"lode: {error}\n{Lode.Cli.usage}"; return 2
+      Lode.Cli.run (← configFromEnv true) opts
+    | _ => IO.eprintln s!"lode: unknown command\n{Lode.Cli.usage}"; return 2
+  catch e =>
+    IO.eprintln s!"lode: {e}"
+    return 1

@@ -11,3 +11,4 @@ import LodeTest.Lode.RuntimeContextTest
 import LodeTest.Lode.CompactionTest
 import LodeTest.Lode.SpecTest
 import LodeTest.Lode.MiscTest
+import LodeTest.Lode.CliTest
