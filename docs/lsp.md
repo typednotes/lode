@@ -91,6 +91,12 @@ returned actions, and no general RPC escape hatch.
 
 ## Verification
 
+Graph checks now include a parent/child type mismatch, a coherent unpinned parent
+output change and refusal of a conflicting fixed annotation. The prompt directs
+the agent to run diagnostics on a Lean file containing its graph wiring and to
+use hover for argument/output types. [Caller build contracts](build-contracts.md)
+keep user pins authoritative through actual Lun compilation, not merely LSP advice.
+
 ```sh
 lake build +LodeTest.Lode.LspTest
 python3 test/lsp.py

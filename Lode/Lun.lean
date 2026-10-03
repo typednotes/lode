@@ -60,6 +60,86 @@ structure Manifest where
   graphs : Option (Array Json) := none
   deriving ToJson, FromJson
 
+/-- Immutable caller-owned pins, independent of the model-written manifest.
+    Unlisted outputs are inferred and may evolve with dependent Lean code. -/
+structure BuildContracts where
+  outputs : Json := Json.mkObj []
+  inputs : Json := Json.mkObj []
+  dependencies : Json := Json.mkObj []
+  graph : Option String := none
+  deriving ToJson, FromJson
+
+def BuildContracts.parse (j : Json) : Except String BuildContracts := do
+  let fields ← j.getObj?
+  unless fields.toList.all (fun (name,_) => ["outputs","inputs","dependencies","graph"].contains name) do throw "unknown build contract field"
+  let graph ← match j.getObjVal? "graph" with
+    | .error _ | .ok .null => pure none
+    | .ok value => some <$> value.getStr?
+  let c : BuildContracts := {
+    outputs := (j.getObjVal? "outputs").toOption.getD (Json.mkObj [])
+    inputs := (j.getObjVal? "inputs").toOption.getD (Json.mkObj [])
+    dependencies := (j.getObjVal? "dependencies").toOption.getD (Json.mkObj [])
+    graph }
+  for values in [c.outputs,c.inputs] do
+    let fields ← values.getObj?
+    unless fields.size ≤ 1000 do throw "too many pinned types"
+    for (name,value) in fields.toList do
+      unless Validate.functionName name do throw "invalid pinned name"
+      let ty ← value.getStr?
+      unless !ty.trimAscii.isEmpty && ty.utf8ByteSize ≤ 4096 && !ty.contains '\x00' do throw "invalid pinned type"
+  let deps ← c.dependencies.getObj?
+  unless deps.size ≤ 1000 do throw "too many wiring contracts"
+  for (name,value) in deps.toList do
+    unless Validate.functionName name do throw "invalid wired function"
+    let args : List String ← fromJson? value
+    unless args.length ≤ 1000 && args.all Validate.functionName do throw "invalid wired arguments"
+  if let some name := c.graph then unless Validate.functionName name do throw "invalid contract graph"
+  else unless (← c.inputs.getObj?).isEmpty && deps.isEmpty do throw "input/wiring contracts require a graph"
+  return c
+
+def BuildContracts.outputsMatch (c : BuildContracts) (m : Manifest) : Bool :=
+  match c.outputs.getObj? with
+  | .error _ => false
+  | .ok fields => fields.toList.all fun (name,ty) => m.functions.any fun f =>
+      (f.getObjValAs? String "name").toOption == some name && (f.getObjVal? "outputType").toOption == some ty
+
+def BuildContracts.graphMatches (c : BuildContracts) (m : Manifest) : Bool :=
+  match c.graph with
+  | none => true
+  | some name => (m.graphs.getD #[]).any fun g =>
+      (g.getObjValAs? String "name").toOption == some name &&
+      (g.getObjVal? "inputTypes").toOption == some c.inputs &&
+      (g.getObjVal? "dependencies").toOption == some c.dependencies
+
+/-- Execution consumes equality with the caller's pins, never manifest authority.
+    Lun then generates kernel-checked Output/Source/Wiring type contracts. -/
+structure PinnedManifest (c : BuildContracts) where
+  private mk ::
+  manifest : Manifest
+  outputsPreserved : c.outputsMatch manifest = true
+  graphPreserved : c.graphMatches manifest = true
+
+def BuildContracts.pin (c : BuildContracts) (m : Manifest) : Except String (PinnedManifest c) := do
+  let _ ← BuildContracts.parse (toJson c)
+  let mut functions := #[]
+  for f in m.functions do
+    let _ ← f.getObj?
+    let name ← f.getObjValAs? String "name"
+    let f := match c.outputs.getObjVal? name with
+      | .ok ty => f.setObjVal! "outputType" ty
+      | .error _ => f
+    functions := functions.push f
+  let graphs ← m.graphs.mapM fun gs => gs.mapM fun g => do
+    let _ ← g.getObj?
+    if (g.getObjValAs? String "name").toOption == c.graph then
+      return (g.setObjVal! "inputTypes" c.inputs).setObjVal! "dependencies" c.dependencies
+    return g
+  let next := { m with functions, graphs }
+  if ho : c.outputsMatch next = true then
+    if hg : c.graphMatches next = true then return ⟨next,ho,hg⟩
+    else throw "manifest omitted the caller's graph"
+  else throw "manifest omitted a pinned output function"
+
 /-- Read `lun.json`. Only the shape is checked; lun checks the rest and its
     errors go back to the model. -/
 def parseManifest (text : String) : Except String Manifest := do
@@ -69,7 +149,7 @@ def parseManifest (text : String) : Except String Manifest := do
     if (j.getObjVal? old).isOk then
       throw s!"lun.json: \"{old}\" is now \"{new}\" (lun ≥ 0.2.0 has functions and graphs)"
   let m : Manifest ← (fromJson? j).mapError ("lun.json: " ++ ·)
-  unless !m.functions.isEmpty do throw "lun.json: \"functions\" must list at least one function"
+  unless !m.functions.isEmpty || !(m.graphs.getD #[]).isEmpty do throw "lun.json must declare functions or graphs"
   return m
 
 /-- Credentials as lun reads them. -/
@@ -104,6 +184,12 @@ def buildRequest (src : Workspace.Source) (commit : String) (creds : Option Liai
                 credentials := creds.map fun c =>
                   { warrant := Liaison.warrantJson c.warrant, account := c.account } }
     «open» := m.open, functions := m.functions, graphs := m.graphs } : Request)
+
+/-- Only the checked manifest enters the writer's actual lun_build request. -/
+def checkedBuildRequest (src : Workspace.Source) (commit : String) (creds : Option Liaison.Credentials)
+    (m : Manifest) (c : BuildContracts) : Except String Json := do
+  let checked ← c.pin m
+  return buildRequest src commit creds checked.manifest
 
 -- ── lun's answers ───────────────────────────────────────────────────────────
 

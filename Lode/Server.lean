@@ -123,7 +123,7 @@ private def message (s : Session) (req : Network.WebApp.Request) : IO Network.We
   match ← s.updateAccess creds m.tools m.agent execution false with
   | .error e => return error (if e == "the agent cannot change during a run" then 409 else 400) e
   | .ok _ => pure ()
-  let queued ← s.send m.text
+  let queued ← if m.controlOnly == some true then pure false else s.send m.text
   return json 202 (Json.mkObj [("queued", toJson queued), ("session", ← s.status)])
 
 private def messages (s : Session) (req : Network.WebApp.Request) : IO Network.WebApp.Response := do

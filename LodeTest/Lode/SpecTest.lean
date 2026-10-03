@@ -11,6 +11,10 @@ open Lode
 
 namespace LodeTests.Spec
 
+#guard (MessageRequest.parse (Json.mkObj [("text","narrow"),("controlOnly",.bool true)])).toOption.isNone
+#guard (MessageRequest.parse (Json.mkObj [("text","narrow"),("controlOnly",.bool true),("tools",Json.arr #[])])).isOk
+#guard (MessageRequest.parse (Json.mkObj [("text","override"),("buildContracts",Json.mkObj [])])).toOption.isNone
+
 def warrant (provider : String) : Json :=
   Json.mkObj [("id", "w"), ("orgId", "org"), ("tag", "00"), ("caveats", Json.arr #[
     Json.mkObj [("kind", "runId"), ("value", "run")],

@@ -6,6 +6,26 @@
 import LodeTest.Util
 import Lode.Lun
 
+open Lean (Json toJson)
+
+private def pinned : Lode.Lun.BuildContracts := {
+  outputs := Json.mkObj [("parent",.str "Nat")]
+  inputs := Json.mkObj [("x",.str "Nat")]
+  dependencies := Json.mkObj [("parent",toJson (["x"] : List String))]
+  graph := some "main" }
+private def candidate : Lode.Lun.Manifest := {
+  functions := #[Json.mkObj [("name",.str "parent"),("signature",.str "Nat → Eff [] String"),("outputType",.str "String")]]
+  graphs := some #[Json.mkObj [("name",.str "main"),("program",.str "parent x"),("inputTypes",Json.mkObj [("x",.str "String")])]] }
+#guard (pinned.pin candidate).isOk
+#guard ((pinned.pin candidate).toOption.map (fun m => (m.manifest.functions[0]!.getObjValAs? String "outputType").toOption)) == some (some "Nat")
+#guard (pinned.pin {candidate with functions := #[]}).toOption.isNone
+#guard (pinned.pin {candidate with graphs := none}).toOption.isNone
+#guard (({} : Lode.Lun.BuildContracts).pin candidate).isOk
+#guard (Lode.Lun.BuildContracts.parse (Json.mkObj [("outputs",Json.mkObj [("parent",.num 12)])])).toOption.isNone
+#guard (Lode.Lun.BuildContracts.parse (Json.mkObj [("policy",Json.mkObj [])])).toOption.isNone
+example (m : Lode.Lun.PinnedManifest pinned) : pinned.outputsMatch m.manifest = true := m.outputsPreserved
+example (m : Lode.Lun.PinnedManifest pinned) : pinned.graphMatches m.manifest = true := m.graphPreserved
+
 open Lean (Json fromJson?)
 open Lode.Lun
 

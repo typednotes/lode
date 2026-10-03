@@ -288,6 +288,19 @@ def main():
         assert ok(operation="definition", line=1, character=21)["omitted"] > 0
         print("PASS: real diagnostics, hover, completion, definition, goals and UTF-16 positions")
 
+        # A graph-shaped pipeline: a child requires String while its unpinned
+        # parent's inferred output is Nat. LSP locates the mismatch; changing
+        # only the parent implementation coherently makes the graph type-check.
+        graph_doc=project/"Graph.lean"
+        graph_doc.write_text('def parent (n : Nat) : Nat := n\ndef child (n : String) : Nat := n.length\ndef graph (n : Nat) : Nat := child (parent n)\n')
+        errors=ok(operation="diagnostics",path="Graph.lean")
+        assert any(d["severity"]==1 for d in errors),errors
+        graph_doc.write_text('def parent (n : Nat) : String := toString n\ndef child (n : String) : Nat := n.length\ndef graph (n : Nat) : Nat := child (parent n)\n')
+        assert ok(operation="diagnostics",path="Graph.lean")==[]
+        graph_doc.write_text('def parent (n : Nat) : Nat := toString n\ndef child (n : String) : Nat := n.length\ndef graph (n : Nat) : Nat := child (parent n)\n')
+        assert any(d["severity"]==1 for d in ok(operation="diagnostics",path="Graph.lean"))
+        print("PASS: real Lean LSP diagnoses graph argument mismatch, accepts unpinned parent output changes and rejects a conflicting fixed output annotation")
+
         # Denials traverse the actual dispatcher and must not even start Lake.
         denied(policy=[], no_spawn=True)
         denied(agent=["read"], no_spawn=True)

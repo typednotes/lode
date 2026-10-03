@@ -95,6 +95,7 @@ structure Meta where
   executionBounds : Option Runtime.Bounds := none
   workspace : Workspace.State
   lastBuild : Option String := none
+  buildContracts : Option Lun.BuildContracts := none
   todos : Array Tools.Todo := #[]
   usage : Usage := {}
   /-- How the last run ended, if it did not end well. -/
@@ -205,7 +206,7 @@ def Session.create (cfg : Config) (spec : SessionSpec) : IO Session := do
       id, created := ← nowMs, source := spec.source, agent := spec.agent
       model := spec.model, workspace := st, tools := spec.tools
       toolCeiling := some spec.tools, credentialBindings := CredentialBindings.ofCredentials spec.creds
-      executionCeiling := spec.execution.map (·.bounds), executionBounds := spec.execution.map (·.bounds) }
+      executionCeiling := spec.execution.map (·.bounds), executionBounds := spec.execution.map (·.bounds), buildContracts := some spec.buildContracts }
     let s ← make cfg m #[]
     s.creds.set { spec.creds with execution := spec.execution }
     IO.FS.writeFile (logFile cfg id) ""
@@ -250,6 +251,7 @@ structure StatusView where
   agent : String
   tools : Tools.Policy
   execution : Option Runtime.Bounds := none
+  buildContracts : Lun.BuildContracts := {}
   model : ModelView
   workspace : WorkspaceView
   lastBuild : Option String := none
@@ -270,6 +272,7 @@ def Session.status (s : Session) : IO Json := do
     id := m.id, created := m.created, state := if c.running then "running" else "idle"
     steps := if c.running then some steps else none, queued := c.queue.size
     source := m.source, agent := m.agent, tools := m.tools, execution := m.executionBounds
+    buildContracts := m.buildContracts.getD {}
     model := { api := m.model.api.toString, name := m.model.name, baseUrl := m.model.baseUrl }
     workspace := { remoteHead := m.workspace.remoteHead }, lastBuild := m.lastBuild
     todos := ← s.todos.get, usage := m.usage, entries := (← s.entries.get).size
@@ -331,7 +334,7 @@ def Session.toolEnv (s : Session) : IO Tools.Env := do
           let name ← IO.ofExcept ((graph.getObjValAs? String "name").mapError IO.userError)
           unless bounds.graphs.contains name do throw (IO.userError "lun.json declares a graph outside caller execution bounds")
       let cr ← s.creds.get
-      let request := Lun.buildRequest m.source m.workspace.remoteHead (cr.lun <|> cr.repo) manifest
+      let request ← IO.ofExcept ((Lun.checkedBuildRequest m.source m.workspace.remoteHead (cr.lun <|> cr.repo) manifest (m.buildContracts.getD {})).mapError IO.userError)
       let status ← Lun.build lun request s.abort
       s.updateMeta ({ · with lastBuild := some status.id })
       let note := if pending.isEmpty then "" else

@@ -33,6 +33,12 @@ This documentation describes the coordinated **Lode 0.4.2 / Lun 0.3.0 /
 Typednotes 0.7.2 / Linen 1.10.0 / Liaison 0.6.0** release. Package locks and
 runtime/image defaults use this set; local release tags still require publication.
 
+The local **0.4.3** implementation adds immutable caller-pinned output/source/
+wiring contracts and explicit graph/parent checks through the existing Lean LSP
+tool. Unpinned outputs may evolve coherently; user pins are retained in actual
+Lun builds. See [build contracts](docs/build-contracts.md) and
+[the release contract](docs/release-0.4.3.md).
+
 lode holds no third-party credential: it reaches the repository (GitHub,
 GitLab) and supported generative models using Messages, Chat Completions,
 Responses, Gemini or Radius Pi/SSE through [`liaison`](https://github.com/typednotes/liaison/tree/main), with

@@ -36,6 +36,7 @@ import Lode.Model
 import Lode.Workspace
 import Lode.Prompt
 import Lode.RuntimeContext
+import Lode.Lun
 
 namespace Lode
 
@@ -90,6 +91,7 @@ structure SessionRequest where
   message : Option String := none
   tools : Option Tools.Policy := none
   execution : Option Json := none
+  buildContracts : Option Json := none
   deriving FromJson
 
 /-- Fresh credentials, field by field (`PUT …/credentials`, or with a message). -/
@@ -107,6 +109,8 @@ structure MessageRequest where
   agent : Option String := none
   tools : Option Tools.Policy := none
   execution : Option Json := none
+  /-- Apply a checked narrowing without enqueueing a paid model turn. -/
+  controlOnly : Option Bool := none
   deriving FromJson
 
 -- ── Checking them ───────────────────────────────────────────────────────────
@@ -120,6 +124,7 @@ structure SessionSpec where
   message : Option String
   tools : Tools.Policy := Tools.Policy.all
   execution : Option Runtime.Context := none
+  buildContracts : Lun.BuildContracts := {}
 
 /-- The providers a repository warrant may be for. -/
 def repoProviders (repo : System.Git.Repository) : Except String (List String) :=
@@ -140,6 +145,7 @@ def CredentialsRefresh.check (r : CredentialsRefresh) (repo : System.Git.Reposit
 
 /-- Parse a credentials refresh. -/
 def CredentialSet.parse (j : Json) (repo : System.Git.Repository) : Except String CredentialSet := do
+  if (j.getObjVal? "buildContracts").isOk then throw "build contracts are immutable; start a new session"
   if (j.getObjVal? "tools").isOk then throw "credentials: tool policy updates belong on messages"
   let r : CredentialsRefresh ← (fromJson? j).mapError ("credentials: " ++ ·)
   r.check repo
@@ -152,7 +158,9 @@ def checkText (t : String) (ctx : String) : Except String String := do
 
 /-- Parse a message request. -/
 def MessageRequest.parse (j : Json) : Except String MessageRequest := do
+  if (j.getObjVal? "buildContracts").isOk then throw "build contracts are immutable; start a new session"
   let m : MessageRequest ← (fromJson? j).mapError ("message: " ++ ·)
+  if m.controlOnly == some true && m.tools.isNone && m.execution.isNone then throw "controlOnly requires a policy narrowing"
   if let .ok tools := j.getObjVal? "tools" then let _ ← Tools.Policy.parse tools
   if let .ok credentials := j.getObjVal? "credentials" then
     if (credentials.getObjVal? "tools").isOk then throw "credentials: tool policy updates belong on messages"
@@ -190,13 +198,14 @@ def SessionSpec.parse (j : Json) (defaultModel : Option Model.Config) (allowLoca
   unless (Prompt.agent? agent).isSome do throw "agent: 'build' or 'plan'"
   let message ← r.message.mapM (checkText · "message")
   let execution ← r.execution.mapM Runtime.Context.parse
+  let buildContracts ← r.buildContracts.mapM Lun.BuildContracts.parse
   if let some execution := execution then
     let org ← (← execution.execution.getObjVal? "binding").getObjValAs? String "org_id"
     unless orgs.all (· == org) do throw "execution and writer credentials belong to different organizations"
   return {
     source := { repo, branch := r.source.branch, path }, agent, model
     creds := { repo := sourceCreds, model := modelCreds, lun := lunCreds }, message
-    tools := r.tools.getD Tools.Policy.all, execution }
+    tools := r.tools.getD Tools.Policy.all, execution, buildContracts := buildContracts.getD {} }
 
 /-- Persisted connection identity, without warrant tags or credential material. -/
 structure CredentialBinding where
