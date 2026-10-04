@@ -12,6 +12,7 @@ import Lode.RuntimeContext
 import Lode.Prompt
 import Lode.Compaction
 import Lode.Spec
+import Lode.Question
 import Lode.Session
 import Lode.Server
 import Lode.Cli

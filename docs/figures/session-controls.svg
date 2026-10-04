@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="450" viewBox="0 0 1000 450" role="img" aria-labelledby="title desc">
+  <title id="title">Control a running Lode session</title>
+  <desc id="desc">A task starts work in an idle session. The model and tools run in steps. Steering messages are queued and consumed between steps. A normal completion returns the session to idle. An abort request takes effect when the current operation can stop and records an aborted event.</desc>
+  <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#52617a"/></marker></defs>
+  <rect width="1000" height="450" rx="20" fill="#f7f8fc"/>
+  <g font-family="Arial, Helvetica, sans-serif" fill="#18243b">
+    <text x="36" y="44" font-size="13" font-weight="700" letter-spacing="2" fill="#6653a1">04 / SESSION CONTROLS</text>
+    <text x="36" y="80" font-size="27" font-weight="700">Steer between steps. Resume the same history.</text>
+    <g class="card">
+      <rect x="36" y="176" width="140" height="103" rx="14" fill="#ffffff" stroke="#d6ddeb"/>
+      <text x="56" y="211" font-size="21" font-weight="700">Idle</text>
+      <text x="56" y="243" font-size="16">New or saved</text>
+      <text x="56" y="265" font-size="16">session</text>
+    </g>
+    <path d="M 176 227 H 240" fill="none" stroke="#52617a" stroke-width="2.5" marker-end="url(#arrow)"/>
+    <text x="210" y="208" font-size="13" text-anchor="middle" fill="#52617a">task</text>
+    <g class="card">
+      <rect x="250" y="176" width="194" height="103" rx="14" fill="#eee9fa" stroke="#8d79bd"/>
+      <text x="270" y="211" font-size="21" font-weight="700" fill="#5b438c">Model + tools</text>
+      <text x="270" y="243" font-size="17">Current step</text>
+      <text x="270" y="265" font-size="16">Results enter the log</text>
+    </g>
+    <path d="M 444 227 H 503" fill="none" stroke="#52617a" stroke-width="2.5" marker-end="url(#arrow)"/>
+    <g class="card">
+      <rect x="513" y="176" width="201" height="103" rx="14" fill="#eee9fa" stroke="#8d79bd"/>
+      <text x="533" y="211" font-size="21" font-weight="700" fill="#5b438c">Next model step</text>
+      <text x="533" y="243" font-size="17">Queued tasks arrive</text>
+      <text x="533" y="265" font-size="16">Continue or finish</text>
+    </g>
+    <path d="M 714 227 H 772" fill="none" stroke="#52617a" stroke-width="2.5" marker-end="url(#arrow)"/>
+    <g class="card">
+      <rect x="782" y="176" width="182" height="103" rx="14" fill="#e7f4ef" stroke="#69a890"/>
+      <text x="802" y="211" font-size="21" font-weight="700" fill="#22634e">Idle again</text>
+      <text x="802" y="243" font-size="16">run_finished</text>
+      <text x="802" y="265" font-size="16">Ready for next task</text>
+    </g>
+    <path d="M 614 137 V 167" fill="none" stroke="#52617a" stroke-width="2" marker-end="url(#arrow)"/>
+    <text x="614" y="121" text-anchor="middle" font-size="16" fill="#52617a">Steering task → queue</text>
+    <path d="M 347 279 V 322 H 509" fill="none" stroke="#52617a" stroke-width="2.5" marker-end="url(#arrow)"/>
+    <text x="348" y="348" text-anchor="middle" font-size="15" fill="#52617a">abort request</text>
+    <g class="card">
+      <rect x="519" y="298" width="262" height="66" rx="12" fill="#fff1d9" stroke="#cda75c"/>
+      <text x="539" y="326" font-size="17" font-weight="700" fill="#80591a">aborted → resume later</text>
+      <text x="539" y="350" font-size="15">History and checkout are retained</text>
+    </g>
+    <text x="36" y="409" font-size="17" fill="#52617a">Long-poll entries with after / next. An active model call ends or times out before abort completes.</text>
+  </g>
+</svg>

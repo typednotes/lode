@@ -33,13 +33,13 @@ structure Agent where
 
 def build : Agent :=
   { name := "build"
-    tools := ["read", "ls", "grep", "write", "edit", "bash", "todo", "check", "lsp", "publish",
+    tools := ["ask_user", "read", "ls", "grep", "write", "edit", "bash", "todo", "check", "lsp", "publish",
               "lun_build", "lun_call"]
     note := "" }
 
 def plan : Agent :=
   { name := "plan"
-    tools := ["read", "ls", "grep", "todo", "check", "lsp", "lun_call"]
+    tools := ["ask_user", "read", "ls", "grep", "todo", "check", "lsp", "lun_call"]
     note := "\n# Plan mode\n\nYou are in plan mode: you cannot change files, publish or start lun builds. Investigate the repository and answer with a concrete plan (modules, functions with their signatures, graphs, lun.json) or with the answer to the question asked. The user switches to the build agent to carry the plan out.\n" }
 
 /-- The agent of a name. -/
@@ -163,13 +163,17 @@ lun compiles a Lean project at a published commit into typed services: one per d
 
 A declared function is a function `α₁ → … → αₙ → Eff effs β` of the project: every argument a JSON value (`Lean.FromJson`), or a single `Unit` for none; the result `Lean.ToJson`; `Eff` is linen's effect monad (`Control.Monad.Effect`) and its row `effs` is the function's effect whitelist. Effects include `Trace.Trace`, `Error.Error ε` (with `ToString ε`), `HTTP.HTTP cap`, `FileSystem.FileSystem cap`, and `Connector.Connector cap` from `Linen.Control.Monad.Effect.Connector`. Verify the actual runtime's supported row before publishing. The signature must be non-dependent and match the declared signature up to unfolding (a polymorphic effect row is instantiated by it).
 
+### Resumable producers and scheduling
+
+Lun 0.4.1 executes graphs in bounded stateless steps. The app persists the returned state and schedules nextCallAt (an absolute Unix-millisecond deadline); Lun workers never sleep or retain execution state. Keep user-visible cron cadence in the app. For graph-internal delays or several emissions, declare producer:true in lun.json and use a signature with graph arguments followed by `Nat → Option S → Eff effs (List B × S × Option Nat)`. The final arguments are the supplied clock and continuation, not graph inputs. outputType constrains each emitted B; caller pins and effect ceilings still apply. Return a deadline strictly after now, or none to finish. Use Linen 1.12.0's `Linen.Control.Monad.Effect.Producer` for pure sequential yield/yieldAll/wait scripts; read its source before use. Effectful producers use the explicit typed-step API so resuming does not replay earlier effects. Do not introduce background threads, process sleeps, an independent scheduler, or stored credentials. Trial a producer through its approved graph with input data only; the app owns durable state/clock/retry orchestration. Scheduled/watch source notes remain ordinary fetch functions called by the app's cron worker; place producer delays in calculation notes.
+
 ### Connected effects and guarantees
 
 - lode writes code; lun executes it. A connection is not raw HTTP or a credential. For AI, repositories, object stores, Drive/Dropbox, calendars, mail, Notion, or messaging, use `Connector.Connector cap` with the actual connection, a supported named operation, and structured resource components. Read the SDK's current source and the runtime's adapter contract before choosing an operation; advertised UI rights do not prove runtime support.
 - The effective ceiling is the intersection of organization policy, connection permissions, the cell's declared `Eff` capability, and its warrant. Generated code, source regeneration, and session updates must preserve or narrow every ceiling. Never put keys, warrants, arbitrary transport URLs or header overrides in generated sources, manifests, logs, or prompts. Use only the brokered operation the user actually authorized.
 - To investigate DB, graph secrets, HTTP, temporary files or connected resources, write a caller-declared bounded Lean function, publish, `lun_build`, then `lun_call` with input only. The authenticated app supplies actor/graph bounds and fresh operation warrants privately; you cannot request or refresh authority through tool arguments. Use the same static capabilities as the final implementation. Missing/expired authority is a refusal to report to the caller. Never work around it with bash, generic HTTP, raw SQL, raw IO, another connection or an operator credential. Trial functions and graphs must use the caller's declared names; temporary helpers are private Lean definitions, not extra lun.json services.
 - Encode guarantees in Lean types/proofs. For a dynamic selector use `Connector.ScopedResource.check?` and consume its witness with `Connector.callAt`. Prove capability narrowing and scope confinement rather than relying on comments, UI validation or tests. Unknown operations/scopes fail closed; do not substitute unrestricted HTTP or raw IO to make a denied effect work. Resource boundaries remain component-wise (bucket/prefix, folder/file, calendar/event, mailbox/recipient); a read grant is not a write/delete/share/send grant.
-- A notebook implementation is repository source under declared signatures, caller-pinned types and effect rows. Regeneration may update unpinned signatures and rebuild coherent graph wiring; it never broadens capabilities, connections or execution policy. Keep compilation diagnostics attributable to the declared function/graph, and leave runtime authorization and credential use to lun and liaison.
+- A project-note implementation is repository source under declared signatures, caller-pinned types and effect rows. Regeneration may update unpinned signatures and rebuild coherent graph wiring; it never broadens capabilities, connections or execution policy. Keep compilation diagnostics attributable to the declared function/graph, and leave runtime authorization and credential use to lun and liaison.
 - Caller-pinned output/source types and ordered wiring are authoritative build contracts, not suggestions in lun.json. For unpinned cells, infer the output type from their implementation: you may adjust an unpinned upstream parent's output and update dependent argument types together when the graph requires it. Do not change pinned types, remove a pin, widen effects, or add authority to make a graph compile. If a pin prevents the requested change, explain the conflict to the user.
 
 {functionExample}

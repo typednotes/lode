@@ -123,7 +123,7 @@ private def message (s : Session) (req : Network.WebApp.Request) : IO Network.We
   match ← s.updateAccess creds m.tools m.agent execution false with
   | .error e => return error (if e == "the agent cannot change during a run" then 409 else 400) e
   | .ok _ => pure ()
-  let queued ← if m.controlOnly == some true then pure false else s.send m.text
+  let queued ← if m.controlOnly == some true then pure false else s.send m.text m.messageKey
   return json 202 (Json.mkObj [("queued", toJson queued), ("session", ← s.status)])
 
 private def messages (s : Session) (req : Network.WebApp.Request) : IO Network.WebApp.Response := do
@@ -169,6 +169,16 @@ def route (r : Registry) (req : Network.WebApp.Request) : IO Network.WebApp.Resp
         unless is .POST do return error 404 "not found"
         if ← s.requestAbort then return json 202 (Json.mkObj [("aborting", toJson true)])
         else return error 409 "no run is going"
+      | ["answer"] =>
+        unless is .POST do return error 404 "not found"
+        match ← readJson req with
+        | .error e => return error 400 e
+        | .ok body =>
+          match (body.getObjValAs? String "id"), (body.getObjValAs? String "answer") with
+          | .ok id, .ok answer =>
+            try s.answer id answer; return json 202 (← s.status)
+            catch e => return error 409 (toString e)
+          | _, _ => return error 400 "answer requires a question id and text"
       | ["credentials"] =>
         unless is .PUT do return error 404 "not found"
         let j ← match ← readJson req with

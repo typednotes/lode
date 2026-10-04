@@ -92,6 +92,8 @@ structure SessionRequest where
   tools : Option Tools.Policy := none
   execution : Option Json := none
   buildContracts : Option Json := none
+  background : Option Bool := none
+  requestKey : Option String := none
   deriving FromJson
 
 /-- Fresh credentials, field by field (`PUT …/credentials`, or with a message). -/
@@ -111,6 +113,7 @@ structure MessageRequest where
   execution : Option Json := none
   /-- Apply a checked narrowing without enqueueing a paid model turn. -/
   controlOnly : Option Bool := none
+  messageKey : Option String := none
   deriving FromJson
 
 -- ── Checking them ───────────────────────────────────────────────────────────
@@ -125,6 +128,14 @@ structure SessionSpec where
   tools : Tools.Policy := Tools.Policy.all
   execution : Option Runtime.Context := none
   buildContracts : Lun.BuildContracts := {}
+  background : Bool := false
+  requestKey : Option String := none
+
+/-- A bounded caller retry key; it is identity, never execution authority. -/
+def checkRetryKey (value : String) : Except String String := do
+  unless !value.isEmpty && value.utf8ByteSize ≤ 128 && value.all (fun c => c.isAlphanum || c == '-' || c == '_') do
+    throw "retry key must contain 1–128 identifier bytes"
+  return value
 
 /-- The providers a repository warrant may be for. -/
 def repoProviders (repo : System.Git.Repository) : Except String (List String) :=
@@ -167,6 +178,7 @@ def MessageRequest.parse (j : Json) : Except String MessageRequest := do
     if (credentials.getObjVal? "execution").isOk then throw "message execution belongs at the top level"
   let _ ← m.execution.mapM Runtime.Context.parse
   let _ ← checkText m.text "message.text"
+  let _ ← m.messageKey.mapM checkRetryKey
   return m
 
 /-- Parse a session request. `defaultModel` is the server's model, if it has
@@ -199,13 +211,15 @@ def SessionSpec.parse (j : Json) (defaultModel : Option Model.Config) (allowLoca
   let message ← r.message.mapM (checkText · "message")
   let execution ← r.execution.mapM Runtime.Context.parse
   let buildContracts ← r.buildContracts.mapM Lun.BuildContracts.parse
+  let requestKey ← r.requestKey.mapM checkRetryKey
   if let some execution := execution then
     let org ← (← execution.execution.getObjVal? "binding").getObjValAs? String "org_id"
     unless orgs.all (· == org) do throw "execution and writer credentials belong to different organizations"
   return {
     source := { repo, branch := r.source.branch, path }, agent, model
     creds := { repo := sourceCreds, model := modelCreds, lun := lunCreds }, message
-    tools := r.tools.getD Tools.Policy.all, execution, buildContracts := buildContracts.getD {} }
+    tools := r.tools.getD Tools.Policy.all, execution, buildContracts := buildContracts.getD {}
+    background := r.background.getD false, requestKey }
 
 /-- Persisted connection identity, without warrant tags or credential material. -/
 structure CredentialBinding where

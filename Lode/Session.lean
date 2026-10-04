@@ -67,7 +67,7 @@ structure Config where
   /-- Pre-built packages: `{cache}/linen/{rev}`. -/
   packageCache : Option FilePath := none
   /-- What new projects should require. -/
-  linenRev : String := "v1.10.0"
+  linenRev : String := "v1.12.0"
   toolchain : String := "leanprover/lean4:v4.34.0"
 
 -- ── Time ────────────────────────────────────────────────────────────────────
@@ -80,6 +80,11 @@ def isoDate (ms : Nat) : String :=
   Data.Time.ISO8601.extendedDate (Data.Time.UTCTime.ofNanosSinceEpoch (ms * 1000000))
 
 -- ── Metadata ────────────────────────────────────────────────────────────────
+
+/-- Checkout is a lifecycle phase, separate from permission to execute tools. -/
+inductive CheckoutPhase where
+  | opening | ready | failed
+  deriving DecidableEq, Repr, ToJson, FromJson
 
 /-- What is persisted about a session (no credentials). -/
 structure Meta where
@@ -96,6 +101,10 @@ structure Meta where
   workspace : Workspace.State
   lastBuild : Option String := none
   buildContracts : Option Lun.BuildContracts := none
+  checkout : Option CheckoutPhase := none
+  requestKey : Option String := none
+  messageKeys : Option (Array String) := none
+  question : Option PendingQuestion := none
   todos : Array Tools.Todo := #[]
   usage : Usage := {}
   /-- How the last run ended, if it did not end well. -/
@@ -105,6 +114,15 @@ structure Meta where
 /-- Read back persisted metadata. -/
 def Meta.ofJson (j : Json) : Except String Meta :=
   (fromJson? j).mapError ("session.json: " ++ ·)
+
+/-- Tool execution consumes readiness of the exact metadata snapshot. Legacy
+    records are ready; only trusted checkout completion changes a new record. -/
+structure CheckoutReady (m : Meta) : Type where
+  private mk ::
+  ready : m.checkout.getD .ready = .ready
+
+def CheckoutReady.check? (m : Meta) : Option (CheckoutReady m) :=
+  if h : m.checkout.getD .ready = .ready then some ⟨h⟩ else none
 
 -- ── Paths ───────────────────────────────────────────────────────────────────
 
@@ -184,6 +202,9 @@ def Session.load (cfg : Config) (id : String) : IO Session := do
   let lines ← if ← (logFile cfg id).pathExists then IO.FS.lines (logFile cfg id) else pure #[]
   let entries := lines.filterMap fun l => (Json.parse l >>= Entry.ofJson).toOption
   let s ← make cfg m entries
+  if m.checkout == some .opening then
+    s.updateMeta ({· with checkout := some .failed, error := some "Repository checkout was interrupted by a restart. Retry generation."})
+    s.append (.event "checkout_failed" "Repository checkout was interrupted by a restart." (← nowMs))
   let lastEvent := entries.foldl (init := none) fun acc e => match e with
     | .event k _ _ => some k
     | _ => acc
@@ -206,7 +227,8 @@ def Session.create (cfg : Config) (spec : SessionSpec) : IO Session := do
       id, created := ← nowMs, source := spec.source, agent := spec.agent
       model := spec.model, workspace := st, tools := spec.tools
       toolCeiling := some spec.tools, credentialBindings := CredentialBindings.ofCredentials spec.creds
-      executionCeiling := spec.execution.map (·.bounds), executionBounds := spec.execution.map (·.bounds), buildContracts := some spec.buildContracts }
+      executionCeiling := spec.execution.map (·.bounds), executionBounds := spec.execution.map (·.bounds), buildContracts := some spec.buildContracts
+      checkout := some .ready, requestKey := spec.requestKey }
     let s ← make cfg m #[]
     s.creds.set { spec.creds with execution := spec.execution }
     IO.FS.writeFile (logFile cfg id) ""
@@ -215,6 +237,24 @@ def Session.create (cfg : Config) (spec : SessionSpec) : IO Session := do
   catch e =>
     IO.FS.removeDirAll dir
     throw e
+
+/-- Persist and register first; repository IO is performed only by the background
+    preparation task. No model or tool can execute in this phase. -/
+def Session.createPending (cfg : Config) (spec : SessionSpec) : IO Session := do
+  let id ← newId
+  IO.FS.createDirAll (sessionDir cfg id)
+  let m : Meta := {
+    id, created := ← nowMs, source := spec.source, agent := spec.agent, model := spec.model
+    workspace := {remoteHead := "", localBase := ""}, tools := spec.tools, toolCeiling := some spec.tools
+    credentialBindings := CredentialBindings.ofCredentials spec.creds
+    executionCeiling := spec.execution.map (·.bounds), executionBounds := spec.execution.map (·.bounds)
+    buildContracts := some spec.buildContracts, checkout := some .opening, requestKey := spec.requestKey }
+  let s ← make cfg m #[]
+  s.creds.set {spec.creds with execution := spec.execution}
+  IO.FS.writeFile (logFile cfg id) ""
+  s.saveMeta
+  s.append (.event "checkout_started" "Preparing repository checkout." (← nowMs))
+  return s
 
 -- ── Status ──────────────────────────────────────────────────────────────────
 
@@ -260,6 +300,10 @@ structure StatusView where
   entries : Nat
   credentials : CredentialsView
   error : Option String := none
+  checkout : String := "ready"
+  backgroundCheckout : Bool := true
+  requestKey : Option String := none
+  question : Option PendingQuestion := none
   deriving ToJson
 
 /-- The session's status. -/
@@ -269,7 +313,7 @@ def Session.status (s : Session) : IO Json := do
   let cr ← s.creds.get
   let steps ← s.steps.get
   return toJson ({
-    id := m.id, created := m.created, state := if c.running then "running" else "idle"
+    id := m.id, created := m.created, state := if m.checkout == some .opening then "opening" else if m.checkout == some .failed then "failed" else if m.question.isSome then "waiting" else if c.running || !c.queue.isEmpty then "running" else "idle"
     steps := if c.running then some steps else none, queued := c.queue.size
     source := m.source, agent := m.agent, tools := m.tools, execution := m.executionBounds
     buildContracts := m.buildContracts.getD {}
@@ -277,7 +321,8 @@ def Session.status (s : Session) : IO Json := do
     workspace := { remoteHead := m.workspace.remoteHead }, lastBuild := m.lastBuild
     todos := ← s.todos.get, usage := m.usage, entries := (← s.entries.get).size
     credentials := { repo := cr.repo.isSome, model := cr.model.isSome, lun := cr.lun.isSome, execution := cr.execution.isSome }
-    error := m.error } : StatusView)
+    error := m.error, requestKey := m.requestKey, question := m.question
+    checkout := match m.checkout.getD .ready with | .opening => "opening" | .ready => "ready" | .failed => "failed" } : StatusView)
 
 -- ── What a run needs ────────────────────────────────────────────────────────
 
@@ -309,12 +354,17 @@ private def publishedManifest (s : Session) : IO String := do
 /-- The tools' view of this session. -/
 def Session.toolEnv (s : Session) : IO Tools.Env := do
   let m ← s.info.get
+  let some _ready := CheckoutReady.check? m | throw (IO.userError "repository checkout is not ready")
   let root ← IO.FS.realPath (checkoutDir s.cfg s.id)
   let project := if m.source.path.isEmpty then [] else m.source.path.splitOn "/"
   let projectDir := project.foldl (fun (acc : FilePath) (c : String) => acc / c) root
   return {
     root, project, abort := s.abort, checkTimeoutMs := s.cfg.checkTimeoutMs, todos := s.todos
     seed := Workspace.seedCache s.cfg.packageCache projectDir s.cfg.gitTimeoutMs
+    askUser := fun question => do
+      let id ← newId
+      s.updateMeta fun m => {m with question := some {id,question}}
+      s.append (.event "user_question" question.text (← nowMs))
     publish := fun message => do
       let m ← s.info.get
       let (st, report) ← Workspace.publish s.wctx m.source (← s.creds.get).repo (checkoutDir s.cfg s.id)
@@ -368,6 +418,7 @@ inductive Outcome where
   | aborted
   | outOfFuel
   | failed (message : String)
+  | awaitingAnswer
 
 /-- What stays fixed during a run. -/
 structure Run where
@@ -456,11 +507,14 @@ def Session.loop (s : Session) (r : Run) : Nat → IO Outcome
       else s.loop r fuel
     else
       let mut results : Array ToolResult := #[]
+      let mut asked := false
       for call in reply.calls do
         if ← s.abort.get then
           results := results.push {
             id := call.id, name := call.name, content := "(aborted by the user)", isError := true
             nativeId := call.nativeId }
+        else if asked || (← s.info.get).question.isSome then
+          results := results.push {id := call.id, name := call.name, content := "Work is paused for the user question; no further tool executes before an answer.", isError := true, nativeId := call.nativeId}
         else
           -- Hold the policy lock across execution: a successful narrowing cannot
           -- race a previously authorized call into executing broader authority.
@@ -468,8 +522,10 @@ def Session.loop (s : Session) (r : Run) : Nat → IO Outcome
             let bounded ← get
             Tools.execute r.env bounded.policy r.agent.tools call
           results := results.push result
+          if call.name == "ask_user" && !result.isError then asked := true
       s.append (.toolResults results (← nowMs))
       s.saveMeta
+      if asked || (← s.info.get).question.isSome then return .awaitingAnswer
       s.loop r fuel
 
 /-- Prepare and run to the end, recording how it ended. -/
@@ -487,42 +543,117 @@ def Session.runToEnd (s : Session) : IO Unit := do
         { repoUrl := m.source.repo.cloneUrl, branch := m.source.branch, projectPath := m.source.path
           remoteHead := m.workspace.remoteHead, canPublish, hasLun := s.cfg.lun.isSome
           toolchain := s.cfg.toolchain, linenRev := s.cfg.linenRev, date := isoDate (← nowMs) }
-      let system := Prompt.system agent penv (← Prompt.contextFiles env.root env.project)
+      let system := Prompt.system agent penv (← Prompt.contextFiles env.root env.project) ++
+        "\n# Automatic mode\nThe app asks you to work autonomously within the declared project/tool/effect ceilings: inspect, edit, check, build and publish approved code without asking at every step. If a real user decision or missing non-secret requirement prevents correct work, call ask_user and pause. Do not invent an answer, request credentials, or treat an answer as expanded authority. Report permission denials; never bypass them.\n"
       s.updateMeta ({ · with error := none })
       s.loop { agent, system, env } s.cfg.maxSteps
     catch e => pure (.failed (toString e))
   match outcome with
   | .done => pure ()
+  | .awaitingAnswer =>
+    if ← s.abort.get then
+      s.updateMeta fun m => {m with question := none}
+      s.finish "aborted" "the user cancelled the pending question"
+    else s.control.atomically (m := IO) (modify fun c => {c with running := false})
   | .aborted => s.finish "aborted" "the run was aborted"
   | .outOfFuel => s.finish "out_of_fuel" s!"the run used its {s.cfg.maxSteps} steps without finishing"
   | .failed msg => s.finish "error" msg
 
 /-- A user message: starts a run, or joins the running one's queue. Returns
     whether it was queued. -/
-def Session.send (s : Session) (text : String) : IO Bool := do
+def Session.send (s : Session) (text : String) (messageKey : Option String := none) : IO Bool := do
   let started ← s.control.atomically (m := IO) do
     let c ← get
-    if c.running then
+    let m ← s.info.get
+    if m.question.isSome then throw (IO.userError "answer the pending user question before continuing")
+    if m.checkout == some .failed then throw (IO.userError (m.error.getD "repository checkout failed"))
+    if let some key := messageKey then
+      if (m.messageKeys.getD #[]).contains key then return false
+      s.updateMeta fun m =>
+        let keys := (m.messageKeys.getD #[]).push key
+        {m with messageKeys := some ((keys.toList.drop (keys.size - 64)).toArray)}
+    if c.running || m.checkout == some .opening then
       set { c with queue := c.queue.push text }
       return false
     s.abort.set false
     s.append (.event "run_started" "" (← nowMs))
+    for previous in c.queue do s.append (.user previous (← nowMs))
     s.append (.user text (← nowMs))
-    set { c with running := true }
+    set { c with running := true, queue := #[] }
     return true
   if started then
     let _ ← IO.asTask (prio := .dedicated) s.runToEnd
   return !started
 
+/-- Consume a typed answer to the current question ID; resumption uses the same
+    immutable launch/current ceilings and never installs new authority. -/
+def Session.answer (s : Session) (id value : String) : IO Unit := do
+  let deadline := (← IO.monoMsNow) + 5000
+  repeat
+    if !(← s.control.atomically (m := IO) do return (← get).running) then break
+    if (← IO.monoMsNow) ≥ deadline then throw (IO.userError "the writer is finishing its pause; retry this answer")
+    IO.sleep 10
+  s.control.atomically (m := IO) do
+    let c ← get
+    if c.running then throw (IO.userError "the writer is finishing its pause; retry this answer")
+    let text ← s.metaLock.atomically (m := IO) do
+      let m ← s.info.get
+      let some pending := m.question | throw (IO.userError "there is no pending user question")
+      unless pending.id == id do throw (IO.userError "this question was already answered or replaced")
+      let answer ← IO.ofExcept ((pending.question.answer value).mapError IO.userError)
+      s.info.set {m with question := none}
+      s.saveMetaUnlocked
+      return s!"Answer to the user question '{pending.question.text}': {answer.value}"
+    s.abort.set false
+    s.append (.event "run_started" "User question answered." (← nowMs))
+    for previous in c.queue do s.append (.user previous (← nowMs))
+    s.append (.user text (← nowMs))
+    set {c with running := true, queue := #[]}
+  let _ ← IO.asTask (prio := .dedicated) s.runToEnd
+
+/-- Finish checkout, then atomically start any queued intent. Authority is still
+    revalidated by the existing bounded tool/runtime paths for each execution. -/
+def Session.prepare (s : Session) : IO Unit := do
+  try
+    let m ← s.info.get
+    let st ← Workspace.open s.wctx m.source (← s.creds.get).repo (checkoutDir s.cfg s.id)
+    if ← s.abort.get then throw (IO.userError "repository checkout was cancelled")
+    s.updateMeta ({· with workspace := st, checkout := some .ready, error := none})
+    s.append (.event "checkout_ready" "Repository checkout is ready." (← nowMs))
+    let started ← s.control.atomically (m := IO) do
+      let c ← get
+      if c.queue.isEmpty then return false
+      let m ← s.info.get
+      let some _ready := CheckoutReady.check? m | throw (IO.userError "repository checkout is not ready")
+      s.append (.event "run_started" "" (← nowMs))
+      for text in c.queue do s.append (.user text (← nowMs))
+      set {c with running := true, queue := #[]}
+      return true
+    if started then s.runToEnd
+  catch e =>
+    s.updateMeta ({· with checkout := some .failed, error := some s!"Repository checkout failed: {e}"})
+    s.finish "checkout_failed" s!"Repository checkout failed: {e}"
+
 /-- Ask the running run to stop (at its next step, or as soon as the tool or
     lun build it is in notices). -/
-def Session.requestAbort (s : Session) : IO Bool := do
-  let running := (← s.control.atomically (m := IO) get).running
-  if running then s.abort.set true
-  return running
+def Session.requestAbort (s : Session) : IO Bool :=
+  s.control.atomically (m := IO) do
+    let c ← get
+    let m ← s.info.get
+    if m.question.isSome then
+      if c.running then s.abort.set true
+      else
+        s.updateMeta fun m => {m with question := none, error := none}
+        s.append (.event "aborted" "the user cancelled the pending question" (← nowMs))
+        s.abort.set false
+        set {c with queue := #[]}
+      return true
+    let running := c.running || m.checkout == some .opening
+    if running then s.abort.set true
+    return running
 
 /-- Whether a run is going. -/
-def Session.running (s : Session) : IO Bool := return (← s.control.atomically (m := IO) get).running
+def Session.running (s : Session) : IO Bool := return (← s.control.atomically (m := IO) get).running || (← s.info.get).checkout == some .opening
 
 /-- Validate all changes before mutation. Credentials cannot alter the immutable
     ceiling. Policy transitions are serialized with tool execution. -/
@@ -568,10 +699,11 @@ def Session.updateAccess (s : Session) (fresh : CredentialSet := {})
 structure Registry where
   cfg : Config
   sessions : Std.Mutex (Std.HashMap String Session)
+  creation : Std.Mutex Unit
 
 def Registry.new (cfg : Config) : IO Registry := do
   IO.FS.createDirAll (sessionsDir cfg)
-  return { cfg, sessions := ← Std.Mutex.new {} }
+  return { cfg, sessions := ← Std.Mutex.new {}, creation := ← Std.Mutex.new () }
 
 /-- A session by id, loaded from disk the first time. -/
 def Registry.get? (r : Registry) (id : String) : IO (Option Session) := do
@@ -584,10 +716,27 @@ def Registry.get? (r : Registry) (id : String) : IO (Option Session) := do
     return some s
 
 /-- Create a session and register it. -/
-def Registry.create (r : Registry) (spec : SessionSpec) : IO Session := do
-  let s ← Session.create r.cfg spec
-  r.sessions.atomically (m := IO) (modify (·.insert s.id s))
-  return s
+def Registry.create (r : Registry) (spec : SessionSpec) : IO Session :=
+  r.creation.atomically (m := IO) do
+    if let some key := spec.requestKey then
+      for entry in ← (sessionsDir r.cfg).readDir do
+        if Validate.sessionId entry.fileName then
+          if let some s ← r.get? entry.fileName then
+            let m ← s.info.get
+            if m.requestKey == some key then
+              unless m.source == spec.source && m.agent == spec.agent && toJson m.model == toJson spec.model &&
+                  toJson m.credentialBindings == toJson (CredentialBindings.ofCredentials spec.creds) &&
+                  toJson m.executionCeiling == toJson (spec.execution.map (·.bounds)) &&
+                  toJson m.buildContracts == toJson (some spec.buildContracts) &&
+                  toJson m.toolCeiling == toJson (some spec.tools) do
+                throw (IO.userError "retry key belongs to a different immutable session contract")
+              match ← s.updateAccess spec.creds with
+              | .error e => throw (IO.userError e)
+              | .ok _ => return s
+    let s ← if spec.background then Session.createPending r.cfg spec else Session.create r.cfg spec
+    r.sessions.atomically (m := IO) (modify (·.insert s.id s))
+    if spec.background then let _ ← IO.asTask (prio := .dedicated) s.prepare
+    return s
 
 /-- The ids of every session on disk, newest first. -/
 def Registry.ids (r : Registry) : IO (Array String) := do

@@ -14,7 +14,7 @@
   <a href="https://github.com/typednotes/lode/pkgs/container/lode"><img src="https://img.shields.io/badge/ghcr.io-typednotes%2Flode-blue?logo=docker" alt="Docker image"></a>
   <a href="https://github.com/typednotes/lode/tags"><img src="https://img.shields.io/github/v/tag/typednotes/lode?label=version&sort=semver" alt="Version"></a>
   <a href="https://lean-lang.org/"><img src="https://img.shields.io/badge/Lean-v4.34.0-blue" alt="Lean v4.34.0"></a>
-   <a href="https://github.com/typednotes/linen"><img src="https://img.shields.io/badge/built%20on-linen%20v1.10.0-c9b896" alt="Built on linen v1.10.0"></a>
+   <a href="https://github.com/typednotes/linen"><img src="https://img.shields.io/badge/built%20on-linen%20v1.12.0-c9b896" alt="Built on linen v1.12.0"></a>
    <a href="https://github.com/typednotes/liaison"><img src="https://img.shields.io/badge/speaks-liaison%20v0.6.0-0e6b6f" alt="Speaks liaison v0.6.0"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License: Apache 2.0"></a>
 </p>
@@ -29,11 +29,13 @@ signature ending in linen's `Eff`), **graphs** wiring them, and the `lun.json`
 declaring both. A session is done when lun builds the published commit and the
 functions and graphs answer as intended.
 
-This documentation describes the coordinated **Lode 0.4.2 / Lun 0.3.0 /
-Typednotes 0.7.2 / Linen 1.10.0 / Liaison 0.6.0** release. Package locks and
-runtime/image defaults use this set; local release tags still require publication.
+The current local release is **Lode 0.5.0**, coordinated with **Lun 0.4.1 /
+Typednotes 0.11.0 / Linen 1.12.0 / Liaison 0.6.0 SDK**. It adds background checkout,
+immutable retry identities and bounded user questions; package/image/new-project
+defaults select Linen 1.12.0. Release commits/tags require publication before
+deployment. See [the release contract](docs/release-0.5.0.md).
 
-The local **0.4.3** implementation adds immutable caller-pinned output/source/
+The earlier **0.4.3** implementation added immutable caller-pinned output/source/
 wiring contracts and explicit graph/parent checks through the existing Lean LSP
 tool. Unpinned outputs may evolve coherently; user pins are retained in actual
 Lun builds. See [build contracts](docs/build-contracts.md) and
@@ -54,6 +56,7 @@ format (`Liaison.Wire`). It is built on
 
 ## Table of contents
 
+- [Illustrated user guide](docs/user-guide.md)
 - [Features](#features)
 - [Quick start](#quick-start)
 - [Native CLI](#native-cli)
@@ -108,6 +111,10 @@ format (`Liaison.Wire`). It is built on
   sessions. It uses the same engine as the HTTP service.
 
 ## Quick start
+
+New to Lode? Start with the **[illustrated user guide](docs/user-guide.md)**:
+a no-key local demo, CLI and curl cookbooks, planning and steering, tool
+policies, compiler/LSP feedback, and typed functions and graphs for Lun.
 
 ### Build
 

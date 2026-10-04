@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="405" viewBox="0 0 1000 405" role="img" aria-labelledby="title desc">
+  <title id="title">The native CLI stream contract</title>
+  <desc id="desc">A single UTF-8 task is read from stdin through EOF. The lode run process writes text-only assistant answers to stdout, tool activity and errors to stderr, and persists session metadata, log and checkout in its state directory. It does not start an HTTP listener.</desc>
+  <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#52617a"/></marker></defs>
+  <rect width="1000" height="405" rx="20" fill="#f7f8fc"/>
+  <g font-family="Arial, Helvetica, sans-serif" fill="#18243b">
+    <text x="36" y="44" font-size="13" font-weight="700" letter-spacing="2" fill="#6653a1">02 / NATIVE STDIO</text>
+    <text x="36" y="80" font-size="27" font-weight="700">Pipe tasks in. Keep answers clean.</text>
+    <g class="card">
+      <rect x="36" y="142" width="228" height="105" rx="14" fill="#ffffff" stroke="#d6ddeb"/>
+      <text x="56" y="176" font-size="21" font-weight="700">stdin</text>
+      <text x="56" y="205" font-size="17">One UTF-8 task</text>
+      <text x="56" y="230" font-size="16" fill="#52617a">Through EOF · ≤ 1 MB</text>
+    </g>
+    <path d="M 264 195 H 327" fill="none" stroke="#52617a" stroke-width="2.5" marker-end="url(#arrow)"/>
+    <g class="card">
+      <rect x="336" y="142" width="253" height="105" rx="14" fill="#eee9fa" stroke="#8d79bd"/>
+      <text x="356" y="178" font-family="Consolas, Menlo, monospace" font-size="23" font-weight="700" fill="#5b438c">lode run</text>
+      <text x="356" y="211" font-size="17">Same session engine</text>
+      <text x="356" y="235" font-size="16" fill="#52617a">No HTTP listener</text>
+    </g>
+    <path d="M 589 171 H 642 V 161 H 690" fill="none" stroke="#52617a" stroke-width="2.5" marker-end="url(#arrow)"/>
+    <path d="M 589 217 H 642 V 275 H 690" fill="none" stroke="#52617a" stroke-width="2.5" marker-end="url(#arrow)"/>
+    <g class="card">
+      <rect x="700" y="111" width="264" height="100" rx="14" fill="#e7f4ef" stroke="#69a890"/>
+      <text x="720" y="146" font-size="21" font-weight="700" fill="#22634e">stdout → answer.txt</text>
+      <text x="720" y="176" font-size="17">Assistant answers</text>
+      <text x="720" y="200" font-size="16" fill="#52617a">Suitable for another pipeline</text>
+    </g>
+    <g class="card">
+      <rect x="700" y="230" width="264" height="100" rx="14" fill="#fff1d9" stroke="#cda75c"/>
+      <text x="720" y="265" font-size="21" font-weight="700" fill="#80591a">stderr → progress.log</text>
+      <text x="720" y="295" font-size="17">Tools, progress and errors</text>
+      <text x="720" y="319" font-size="16" fill="#52617a">Session ID + checkout path</text>
+    </g>
+    <g class="card">
+      <rect x="336" y="274" width="253" height="66" rx="12" fill="#ffffff" stroke="#d6ddeb"/>
+      <text x="356" y="301" font-size="17" font-weight="700">Persisted session</text>
+      <text x="356" y="325" font-size="16">Metadata · log · checkout</text>
+    </g>
+    <path d="M 462 247 V 267" fill="none" stroke="#52617a" stroke-width="2" marker-end="url(#arrow)"/>
+    <text x="36" y="376" font-size="17" fill="#52617a">Exit 0: finished · Exit 1: setup/run failure · Exit 2: invalid arguments/stdin</text>
+  </g>
+</svg>

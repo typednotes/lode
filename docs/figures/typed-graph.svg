@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="420" viewBox="0 0 1000 420" role="img" aria-labelledby="title desc">
+  <title id="title">The typed basket graph</title>
+  <desc id="desc">An input named value of type Nat receives 5. The double function produces 10. A no-input seed function produces 10. The add function consumes the two Nat outputs and produces Nat 20. All functions have an empty effect row, Eff [].</desc>
+  <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#52617a"/></marker></defs>
+  <rect width="1000" height="420" rx="20" fill="#f7f8fc"/>
+  <g font-family="Arial, Helvetica, sans-serif" fill="#18243b">
+    <text x="36" y="44" font-size="13" font-weight="700" letter-spacing="2" fill="#6653a1">05 / TYPED FUNCTIONS + GRAPHS</text>
+    <text x="36" y="80" font-size="27" font-weight="700">basket: declared functions, checked connections</text>
+    <g class="card">
+      <rect x="36" y="139" width="194" height="101" rx="14" fill="#e7f4ef" stroke="#69a890"/>
+      <text x="56" y="174" font-size="21" font-weight="700" fill="#22634e">input “value”</text>
+      <text x="56" y="206" font-size="18">Nat · 5</text>
+      <text x="56" y="229" font-size="15" fill="#52617a">Named graph input</text>
+    </g>
+    <path d="M 230 189 H 326" fill="none" stroke="#52617a" stroke-width="2.5" marker-end="url(#arrow)"/>
+    <text x="280" y="174" text-anchor="middle" font-size="15" fill="#52617a">Nat</text>
+    <g class="card">
+      <rect x="336" y="139" width="223" height="101" rx="14" fill="#eee9fa" stroke="#8d79bd"/>
+      <text x="356" y="174" font-size="21" font-weight="700" fill="#5b438c">double</text>
+      <text x="356" y="206" font-size="17">Nat → Eff [] Nat</text>
+      <text x="356" y="229" font-size="16">output: 10</text>
+    </g>
+    <g class="card">
+      <rect x="336" y="266" width="223" height="96" rx="14" fill="#eee9fa" stroke="#8d79bd"/>
+      <text x="356" y="300" font-size="21" font-weight="700" fill="#5b438c">seed</text>
+      <text x="356" y="331" font-size="17">Unit → Eff [] Nat</text>
+      <text x="356" y="348" font-size="16">output: 10 · no input</text>
+    </g>
+    <path d="M 559 189 H 625 V 228 H 700" fill="none" stroke="#52617a" stroke-width="2.5" marker-end="url(#arrow)"/>
+    <path d="M 559 314 H 650 V 272 H 700" fill="none" stroke="#52617a" stroke-width="2.5" marker-end="url(#arrow)"/>
+    <text x="627" y="171" text-anchor="middle" font-size="15" fill="#52617a">Nat · 10</text>
+    <text x="632" y="340" text-anchor="middle" font-size="15" fill="#52617a">Nat · 10</text>
+    <g class="card">
+      <rect x="710" y="182" width="254" height="140" rx="14" fill="#fff1d9" stroke="#cda75c"/>
+      <text x="730" y="218" font-size="21" font-weight="700" fill="#80591a">add</text>
+      <text x="730" y="250" font-size="17">Nat → Nat → Eff [] Nat</text>
+      <text x="730" y="288" font-size="25" font-weight="700" fill="#80591a">output: 20</text>
+      <text x="730" y="311" font-size="15" fill="#52617a">10 + 10</text>
+    </g>
+    <text x="36" y="394" font-size="17" fill="#52617a">Graph wiring stays declarative. Put arithmetic, validation and transformations inside functions.</text>
+  </g>
+</svg>

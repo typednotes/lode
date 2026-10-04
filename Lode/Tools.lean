@@ -25,6 +25,7 @@ import Lode.Process
 import Lode.Validate
 import Lode.ToolPolicy
 import Lode.Lsp
+import Lode.Question
 import Linen.System.LakeLog
 import Linen.Control.Monad.Effect.FileSystem
 
@@ -211,6 +212,7 @@ inductive Args where
   | publish (message : String)
   | lunBuild
   | lunCall (name : String) (input : RuntimeInput)
+  | askUser (question : Lode.Question)
 
 /-- The operation is derived from the arguments actually executed. -/
 def Args.operation : Args → Operation
@@ -218,6 +220,7 @@ def Args.operation : Args → Operation
   | .write .. => .write | .edit .. => .edit | .bash .. => .bash
   | .todo .. => .todo | .check .. => .check | .lsp .. => .lsp | .publish .. => .publish
   | .lunBuild => .lunBuild | .lunCall .. => .lunCall
+  | .askUser .. => .askUser
 
 /-- Execution consumes evidence for both the launch/session ceiling and the
     selected agent. A checked name cannot be swapped for unrelated arguments. -/
@@ -294,6 +297,7 @@ def Args.parse (name : String) (arguments : String) : Except String Args := do
     check (!m.trimAscii.isEmpty && m.length ≤ 10000) "publish.message: a non-empty commit message"
     return .publish m
   | "lun_build" => return .lunBuild
+  | "ask_user" => return .askUser (← Lode.Question.parse j)
   | "lun_call" =>
     let a : LunCallArgs ← fromJson? j
     check (a.kind == "function" || a.kind == "graph") "lun_call.kind: 'function' or 'graph'"
@@ -383,7 +387,11 @@ def specs : Array Model.ToolSpec := #[
     description := "Call a function, or run a graph once, of the latest ready lun build. Function body: {\"input\": x} (x is the value, an array of values for several arguments, omitted for none) or {\"inputs\": [x1, x2]} for several calls. Graph body: {\"inputs\": {\"name\": value}}."
     schema := object [("kind", Json.mkObj [("type", "string"), ("enum", toJson #["function", "graph"])]),
       ("name", prop "string" "The function or graph name"),
-      ("body", prop "object" "Input data only: function input or inputs, graph inputs. Execution policy, bindings and credentials are never model-selected.")] ["kind", "name"] } ]
+      ("body", prop "object" "Input data only: function input or inputs, graph inputs. Execution policy, bindings and credentials are never model-selected.")] ["kind", "name"] },
+  {name := "ask_user", description := "Pause automatic work for a necessary user decision. Ask a concrete question with up to eight short choices and/or a free-text answer. Never ask for credentials or broader authority; an answer is conversation data, not a permission grant.",
+   schema := object [("text",prop "string" "Necessary question (1–4096 UTF-8 bytes)"),
+     ("options",Json.mkObj [("type","array"),("items",prop "string" "Answer choice")]),
+     ("freeText",prop "boolean" "Allow a free-text answer (default true)")] ["text"]} ]
 
 /-- The tools of an agent, by name. -/
 def specsFor (names : List String) : Array Model.ToolSpec := specs.filter (names.contains ·.name)
@@ -409,6 +417,7 @@ structure Env where
   /-- The report, and whether the build failed. -/
   lunBuild : IO (String × Bool)
   lunCall : String → String → Json → IO String
+  askUser : Lode.Question → IO Unit := fun _ => throw (IO.userError "user questions are unavailable")
 
 /-- The project directory's absolute path. -/
 def Env.projectDir (env : Env) : FilePath :=
@@ -571,6 +580,9 @@ private def runUnchecked (env : Env) : Args → IO (String × Bool)
   | .todo items => do
     env.todos.set items
     return (renderTodos items, false)
+  | .askUser question => do
+    env.askUser question
+    return ("Question sent. Work is paused until the user answers.", false)
   | .check targets => check env targets
   | .lsp request => Lode.Lsp.run env.root env.projectDir env.abort env.checkTimeoutMs request
   | .publish message => do

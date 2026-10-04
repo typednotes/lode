@@ -1,5 +1,8 @@
 # Testing lode locally: CLI and curl
 
+For a wider tour with diagrams, task recipes and Lun examples, see the
+[illustrated user guide](user-guide.md).
+
 Both interfaces run the same session engine over a **separate clone** of an
 existing Git branch. Only committed source files enter that clone. `publish`
 creates a commit and pushes it to the local source repository.

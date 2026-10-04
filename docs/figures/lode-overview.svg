@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="510" viewBox="0 0 1000 510" role="img" aria-labelledby="title desc">
+  <title id="title">Lode writes; Lun runs</title>
+  <desc id="desc">Terminal and app clients send tasks to the same Lode session engine. Lode calls a configured model, opens and publishes Git source, and optionally asks Lun to build and call the published commit. Models can be configured directly for development or reached through Liaison connections.</desc>
+  <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#52617a"/></marker></defs>
+  <rect width="1000" height="510" rx="20" fill="#f7f8fc"/>
+  <g font-family="Arial, Helvetica, sans-serif" fill="#18243b">
+    <text x="36" y="44" font-size="13" font-weight="700" letter-spacing="2" fill="#6653a1">01 / THE BIG PICTURE</text>
+    <text x="36" y="80" font-size="27" font-weight="700">One engine, two ways to work</text>
+    <g class="card">
+      <rect x="36" y="178" width="208" height="156" rx="14" fill="#ffffff" stroke="#d6ddeb"/>
+      <text x="56" y="214" font-size="21" font-weight="700">Your interface</text>
+      <text x="56" y="246" font-size="17">Terminal: lode run</text>
+      <text x="56" y="276" font-size="17">Scripts: curl</text>
+      <text x="56" y="306" font-size="17">App: HTTP API</text>
+    </g>
+    <path d="M 245 248 H 302" fill="none" stroke="#52617a" stroke-width="2.5" marker-end="url(#arrow)"/>
+    <text x="272" y="232" text-anchor="middle" font-size="13" fill="#52617a">task</text>
+    <g class="card">
+      <rect x="310" y="158" width="270" height="195" rx="16" fill="#eee9fa" stroke="#8d79bd"/>
+      <text x="332" y="199" font-size="25" font-weight="700" fill="#5b438c">lode</text>
+      <text x="332" y="233" font-size="18">model → tools → model</text>
+      <text x="332" y="269" font-size="17">One checkout per session</text>
+      <text x="332" y="298" font-size="17">Compiler feedback + policy</text>
+      <text x="332" y="327" font-size="17">Persisted conversation log</text>
+    </g>
+    <path d="M 580 202 H 635 V 158 H 688" fill="none" stroke="#52617a" stroke-width="2.5" marker-end="url(#arrow)"/>
+    <path d="M 580 256 H 688" fill="none" stroke="#52617a" stroke-width="2.5" marker-end="url(#arrow)"/>
+    <path d="M 580 310 H 635 V 373 H 688" fill="none" stroke="#52617a" stroke-width="2.5" marker-end="url(#arrow)"/>
+    <g class="card">
+      <rect x="698" y="110" width="266" height="96" rx="14" fill="#ffffff" stroke="#d6ddeb"/>
+      <text x="718" y="145" font-size="21" font-weight="700">Model</text>
+      <text x="718" y="174" font-size="16">Direct dev configuration</text>
+      <text x="718" y="195" font-size="16">or a Liaison connection</text>
+    </g>
+    <g class="card">
+      <rect x="698" y="223" width="266" height="84" rx="14" fill="#e7f4ef" stroke="#69a890"/>
+      <text x="718" y="258" font-size="21" font-weight="700" fill="#22634e">Git repository</text>
+      <text x="718" y="286" font-size="16">Open branch / publish commit</text>
+    </g>
+    <g class="card">
+      <rect x="698" y="324" width="266" height="96" rx="14" fill="#fff1d9" stroke="#cda75c"/>
+      <text x="718" y="359" font-size="21" font-weight="700" fill="#80591a">lun (optional)</text>
+      <text x="718" y="388" font-size="16">Build the published commit</text>
+      <text x="718" y="409" font-size="16">Call functions / run graphs</text>
+    </g>
+    <text x="36" y="466" font-size="17" fill="#52617a">Lode produces repository source. Lun turns a published project into callable services.</text>
+  </g>
+</svg>
