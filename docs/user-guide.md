@@ -8,7 +8,7 @@ result. With Lun configured, it also builds and tries the functions and
 graphs it wrote.
 
 You can drive it from a terminal with **stdin/stdout/stderr**, from a script
-with **curl**, or from the Typednotes app through the HTTP API.
+with **Python or curl**, or from the Typednotes app through the HTTP API.
 
 This guide targets **Lode 0.5.0**, including the native CLI, caller-owned build
 contracts, background checkout and bounded user questions. Older images do not
@@ -22,7 +22,7 @@ CLI/curl walkthrough.
 2. [A first run without an API key](#2-a-first-run-without-an-api-key)
 3. [Choose a real model](#3-choose-a-real-model)
 4. [The CLI cookbook](#4-the-cli-cookbook)
-5. [The curl cookbook](#5-the-curl-cookbook)
+5. [The curl cookbook](#5-the-curl-cookbook) and [Python client](#the-python-cookbook)
 6. [Planning, steering and stopping](#6-planning-steering-and-stopping)
 7. [Choose the tools a session can use](#7-choose-the-tools-a-session-can-use)
 8. [Compiler feedback and Lean LSP](#8-compiler-feedback-and-lean-lsp)
@@ -154,6 +154,38 @@ tool results, `Build succeeded` and `run_finished`. The exit status is `0`.
 For the no-key demos, use a shell without `LODE_MODEL_*` defaults; the
 request supplies its own model. Repeating publication of an identical file
 produces `nothing to publish`: seed a fresh demo for a repeatable first run.
+
+### A complete Python demo, including Lun graphs
+
+To have one script prepare everything, start both services and verify generated
+Lean code and a running graph:
+
+```sh
+uv run Examples/guide/run.py
+uv run Examples/guide/run.py --quiet
+```
+
+Run from this Lode checkout with the coordinated Lun checkout at `../lun`.
+Python 3.10+, [uv](https://docs.astral.sh/uv/getting-started/installation/), Git,
+Lean/Lake and the services' native build dependencies are required. uv installs
+Rich for formatted requests, replies and agent logs. The first native build can
+take a few minutes. `--lun ../lun --linen ../linen` selects local coordinated
+checkouts, and `--skip-build` reuses already-built executables.
+
+The repository starts with **no Lean project**. Scripted assistant turns make
+Lode write and lock the project, check it with Lake and Lean LSP, publish it,
+build it through Lun, repair a deliberate graph error, and try the resulting
+services. The Python client then calls the published runtime itself and resumes
+the graph with saved JSON state. It checks `42`, `15`, `10`, `20`, then `26` after
+an input update, and finishes with **31 checks passed**, the commit and build id.
+
+The default requires no provider key: model turns are fixtures, while compilation,
+publication and execution are real. Add `--real-model` after configuring section 3
+to ask a real model to generate the same project. Add `--keep` to retain the
+printed demo directory for inspection; otherwise the services and their scratch
+state are cleaned up on exit. The [commented walkthrough](../Examples/guide/README.md)
+explains each stage, and [section 9](#the-python-generation-example-step-by-step)
+explains the generated Lean/graph contract.
 
 ## 3. Choose a real model
 
@@ -493,6 +525,100 @@ api -X DELETE "$base/v0/sessions/$id"
 Deletion removes that session's checkout and history, not its published
 commits. A running session returns `409`; request abort and wait first.
 
+### The Python cookbook
+
+[`Examples/client.py`](../Examples/client.py) is a reusable synchronous HTTP
+client using only the Python standard library. It attaches to an existing
+service; [`Examples/guide/run.py`](../Examples/guide/run.py) adds disposable
+service startup, Rich output and end-to-end verification. Unlike Lun's CLI,
+Lode's native CLI is a task batch interface, not JSON-lines RPC, so Python
+session controls use HTTP.
+
+Here is a no-key conversation against the HTTP service from this section.
+Run it from the Lode root after setting the same service URL, token and source:
+
+```sh
+export LODE_URL="$base" LODE_TOKEN="$token" LODE_SOURCE_URL="file://$demo/http.git"
+python3 - <<'PY'
+import os
+from Examples.client import Client
+
+client = Client(os.environ["LODE_URL"], os.environ["LODE_TOKEN"])
+session = client.create({
+    "source": {"url": os.environ["LODE_SOURCE_URL"], "branch": "main"},
+    "tools": [],
+    "model": {"api": "scripted", "script": [{"text": "Python is connected."}]},
+})
+session_id = session["id"]
+# Creating a session and submitting a task are different requests.
+client.send(session_id, "Confirm the Python client is connected.")
+after = 0
+entries = []
+for entry in client.follow(session_id, after=after, timeout=120):
+    entries.append(entry)
+    after = entry["index"] + 1  # Save this entry-index cursor for the next run.
+    if entry["type"] == "assistant":
+        print(entry["text"])
+status = client.status(session_id)
+events = [e["kind"] for e in entries if e["type"] == "event"]
+if status["state"] != "idle" or status["error"] or events[-1:] != ["run_finished"]:
+    raise RuntimeError(status)
+print("Session:", session_id)
+PY
+```
+
+For the following real-task controls, create a new session omitting `model` to
+use the server's configured model, supply the editing/check/publication/Lun
+tool policy from section 7, and send your task. The no-key session above was
+launched with `tools: []` and cannot gain tools later. The client forwards API
+fields without renaming them:
+
+```python
+# Additional arguments are fields of Lode's message request.
+client.send(session_id, "Investigate the mismatch.", agent="plan", messageKey="investigate_1")
+client.send(session_id, "Keep only investigation tools.",
+            tools=["read", "ls", "grep", "todo", "check", "lsp"], controlOnly=True)
+unpublished_diff = client.diff(session_id)  # Plain text, not JSON.
+```
+
+Send an agent change only when idle. A tool-policy edit can only narrow the
+launch/current allowlist. `create` also forwards `background`, `requestKey`,
+`buildContracts` and trusted caller-supplied credentials/execution context.
+The client does not mint warrants or automatically retry mutations. Choose
+retry keys deliberately using the rules in section 12.
+
+`follow` long-polls using the server's `next` cursor. It continues through a
+background checkout whose `running` is initially false, and stops when idle,
+failed or waiting for a question. A client timeout raises `TimeoutError`; the
+remote work continues until you explicitly call `client.abort(session_id)`.
+After submitting another task or answering a question, follow again from your
+saved `after`. With `ask_user` permitted, inspect and answer the real question:
+
+```python
+status = client.status(session_id)
+if status["state"] == "waiting":
+    pending = status["question"]
+    print(pending["question"]["text"])
+    print(pending["question"]["options"])
+    answer = input("Answer: ")
+    client.answer(session_id, pending["id"], answer)
+    for entry in client.follow(session_id, after=after):
+        after = entry["index"] + 1
+        print(entry)
+```
+
+Other helpers are `sessions()`, `messages(session_id, after=…, wait=…)`,
+`credentials(session_id, fresh_credentials)`, `abort(session_id)` and
+`delete(session_id)`. Credential refreshes only forward authenticated material
+issued by your trusted caller. Delete only after work is idle.
+
+Raw `request(method, path, body)` returns `{"status":…, "body":…}` without
+changing HTTP errors into exceptions. Higher-level helpers raise `ApiError`,
+whose `status` and `body` preserve the server's refusal. Transport errors
+propagate separately. Model/tool failures remain log/status data: a
+`run_finished` event means the conversation ended normally, so still inspect
+tool errors, final checks, the published commit and the ready Lun build.
+
 ## 6. Planning, steering and stopping
 
 ![A task starts a run; the model and tools work in steps; a steering task enters between steps; finishing returns to idle or abort records an aborted event.](figures/session-controls.svg)
@@ -697,11 +823,70 @@ Each call starts a bounded ephemeral Lean worker. The tool supports those
 five read-only queries, not arbitrary RPC or code actions. See
 [Lean LSP](lsp.md) for exact limits and result shapes.
 
+### Is Lean LSP sufficient for Lun authoring?
+
+**Use Lean LSP for Lean source; use Lun's existing build API for its declared
+services and graphs.** Hover, completion, definitions, goals and diagnostics
+already give Lode the language-server feedback it needs while writing modules.
+Keep a `.lean` composition helper to check parent/consumer payload types early.
+
+LSP does not inspect a graph stored as a JSON string in `lun.json`, and a
+successful `lake build` does not check that string either. Lun compiles the
+exact declarations and graph with its generated observable wrappers, checks
+supported graph operators and caller-owned type/wiring contracts, and returns
+diagnostics attributed to the function, graph or project. Lode's `lun_build`
+feeds that feedback back to the model; a ready build also describes the graph's
+inputs, nodes, sources and sinks. `lun_call` supplies the execution feedback.
+
+This gives a working authoring loop with the existing Lean LSP and Lun APIs.
+Lun does not currently expose a separate LSP endpoint or completion/hover on
+embedded graph strings. An editor integration for such strings would need to
+map generated-driver positions back to the manifest; it is not required for
+Lode to generate and validate projects now. The generated `LunDriver` module
+belongs to Lun's build package, not an extra dependency of the user project.
+
 ## 9. Write functions and graphs for Lun
 
 Once your goal is a callable service, plain `Nat → Nat` is not enough:
 declared functions end in Linen's effect monad, `Eff effects Result`.
 `Eff []` makes a good first example because it needs no runtime-effect grant.
+
+### The Python generation example, step by step
+
+The [runnable script](../Examples/guide/run.py) follows the full writer-to-runner
+workflow, with comments at each boundary. Its fixed source files are templates
+for the **scripted model's `write` calls**, not a pre-existing project in the
+seed repository:
+
+1. `seed_repository` commits a README in a new bare repository. The branch
+   exists before Lode clones it, and local publication can advance it.
+2. `Client.create` launches with an explicit tool allowlist and `buildContracts`:
+   `double`, `add` and `seed` emit `Nat`; graph `basket` has `value : Nat`;
+   `double` depends on `value`, `seed` has no inputs, and `add` consumes
+   `double` then `seed`. These pins are independent of model-written JSON.
+3. The script's assistant turns write the Lake files, `Demo.lean`,
+   `Demo/Wiring.lean`, and `lun.json`. `lake update` resolves the local Linen
+   dependency into a lock file. Lode then compiles the modules and queries
+   Lean LSP for diagnostics and the type of `double`.
+4. The payload helper composes `double value`, `seed ()`, then `add`. In
+   `lun.json`, the graph composes **observables**: `seed` has no explicit
+   argument, and the final node is `add doubled base`.
+5. The first graph deliberately passes `"oops"` instead of `base`. Lean source
+   checks pass, but Lun rejects that graph and reports `[graph basket]`.
+   The script fixes `lun.json`, checks, publishes, and builds the new commit.
+   This demonstrates why source/LSP checks and a Lun build are both needed.
+6. Lode's `lun_call` tries the functions and graph. The Python client validates
+   those tool outcomes, the final event, empty diff, published artifacts and
+   the ready build's source commit; it then calls Lun directly as the application.
+7. The client retains the graph's returned `state`, updates `value` from `5`
+   to `8`, and verifies that `double` and `add` change while the constant
+   `seed` stays at `10`. The final result changes from `20` to `26`.
+   Sending `8` again produces no changed outcomes.
+
+`--real-model` uses the same caller-owned contract and direct runtime assertions
+with a task sent to the configured model. It does not intentionally request
+the broken graph. The default scripted run proves the tool/build/execution
+pipeline; live-model implementation reliability needs a real-model run.
 
 ### A complete small function module
 
@@ -853,8 +1038,15 @@ curl --fail-with-body -sS "$lun/v0/builds/$build_id/graphs/basket" \
   --data-binary '{"inputs":{"value":5}}' | jq .
 ```
 
-Lode uses builds, function calls and one-shot graph runs. Live reactive graph
-registration and updates belong to Lun/the app, not the Lode session API.
+Lode uses builds, function calls and one-shot graph trials. In the coordinated
+Lun runtime, continued graph execution uses the same graph endpoint with the
+previous JSON `state`, new inputs and optional `now`. Replies include `changed`,
+updated `state` and `nextCallAt`. Your application owns persistence and scheduling;
+there is no graph registration/session API in Lun. Lode's writing session is
+separate from that caller-owned execution state. The Python example demonstrates
+state retention and input updates; see the
+[Lun user guide](https://github.com/typednotes/lun/blob/main/docs/user-guide.md#9-stateless-execution-persistence-and-scheduling)
+for delayed producers and scheduling.
 
 ### Effects remain explicit
 
@@ -1107,6 +1299,8 @@ container as the isolation boundary.
 
 ```sh
 lake test
+python3 test/python_client.py
+uv run Examples/guide/run.py --quiet
 python3 test/cli.py
 test/e2e.sh
 test/liaison.sh

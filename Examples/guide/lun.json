@@ -1,0 +1,11 @@
+{
+  "open": ["Demo"],
+  "functions": [
+    {"name": "double", "module": "Demo", "function": "Demo.double", "signature": "Nat → Eff [] Nat"},
+    {"name": "add", "module": "Demo", "function": "Demo.add", "signature": "Nat → Nat → Eff [] Nat"},
+    {"name": "seed", "module": "Demo", "function": "Demo.seed", "signature": "Unit → Eff [] Nat"}
+  ],
+  "graphs": [
+    {"name": "basket", "program": "do\n  let value ← input \"value\" Nat\n  let doubled ← double value\n  let base ← seed\n  add doubled base"}
+  ]
+}

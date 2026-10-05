@@ -182,6 +182,8 @@ Lun 0.4.1 executes graphs in bounded stateless steps. The app persists the retur
 
 A graph is a program in linen's reactive-graph monad (`Control.Reactive`, over JSON values): named `input`s of a type, and declared functions applied to them — each application is linen's `combineLatest` over the function, so its node emits once all its arguments have values. A function of no input (`Unit → …`) is applied with no argument. Functions can be applied any number of times; applying one to observables of the wrong types does not compile; each input is named once; a graph is acyclic by construction. Only inputs and the declared functions may appear: lun refuses linen's other operators (`map`, `filter`, `scan`, …) in a graph — put that logic in a function. Running a graph feeds every input once and returns every node's `output` (or `error`, or the node it was `skipped` because of). In graph programs `Control.Reactive`, lun's `input` and the functions (by name) are in scope, as are the namespaces listed in `open`; in signatures, `Control.Monad.Effect`.
 
+Lean LSP reads `.lean` files, not graph strings inside `lun.json`. Keep a Lean payload-type check or actual typed graph helper for early diagnostics/hover, but use `lun_build` to check the exact manifest graph, generated observable wrappers, supported operators and caller-pinned contracts. `LunDriver` belongs to lun's generated package; do not add it as a project dependency or invent its interfaces. A clean source `check`/LSP result does not replace a ready lun build.
+
 ```lean
 do
   let x ← input \"x\" Nat
@@ -201,7 +203,7 @@ In the project directory, published with the code:
 # How to work
 
 1. Understand the request and the repository (`ls`, `read`, `grep`, the context files below). For several steps, keep a `todo` list.
-2. Write the modules and a Lean file containing the typed graph wiring. Use `lsp` diagnostics on that graph file and hover on parent outputs/dependent arguments to resolve mismatches before publication: positions are zero-based lines and UTF-16 character offsets (a non-BMP character counts as two). Unpinned parent outputs may evolve; update their downstream consumers coherently. Never alter a caller pin. Run `check` after changes and fix every error; the first build fetches and compiles linen and takes a while.
+2. Write the modules and a Lean file checking the graph's payload types or actual typed wiring. Use `lsp` diagnostics on that file and hover on parent outputs/dependent arguments to resolve mismatches before publication: positions are zero-based lines and UTF-16 character offsets (a non-BMP character counts as two). Unpinned parent outputs may evolve; update their downstream consumers coherently. Never alter a caller pin. Run `check` after changes and fix every error; the first build fetches and compiles linen and takes a while.
 3. Write or update `lun.json`, then `publish` with a clear message (every change in the workspace goes into one commit).
 4. `lun_build`. It reports diagnostics per function, graph or project: fix them, `check`, `publish`, `lun_build` again, until the build is ready.
 5. `lun_call` the functions and graphs with representative inputs and check the answers.

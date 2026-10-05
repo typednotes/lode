@@ -60,6 +60,7 @@ format (`Liaison.Wire`). It is built on
 - [Features](#features)
 - [Quick start](#quick-start)
 - [Native CLI](#native-cli)
+- [Python client and scripted example](#python-client-and-scripted-example)
 - [How a session goes](#how-a-session-goes)
 - [Tools](#tools)
 - [HTTP API](#http-api)
@@ -116,6 +117,11 @@ New to Lode? Start with the **[illustrated user guide](docs/user-guide.md)**:
 a no-key local demo, CLI and curl cookbooks, planning and steering, tool
 policies, compiler/LSP feedback, and typed functions and graphs for Lun.
 
+For an automatically prepared, no-provider-key demonstration that generates a
+complete Lean project and validates a Lun graph, run
+`uv run Examples/guide/run.py`. See the
+[commented Python walkthrough](Examples/guide/README.md).
+
 ### Build
 
 ```sh
@@ -128,6 +134,8 @@ lake build
 lake test          # unit tests (#guard): every parser and pure rule
 test/e2e.sh                   # a real agent loop (scripted model) over a real repository
 python3 test/cli.py           # native stdin/stdout/stderr, local Git/Lake, resume and failures
+python3 test/python_client.py # HTTP client wire shapes, cursors, questions, deadlines and errors
+uv run Examples/guide/run.py --quiet # real Python → Lode → Git/Lean/LSP → Lun graph pipeline
 test/liaison.sh               # GitHub, GitLab and the model through a mock liaison
 python3 test/native.py .lake/build/bin/lode  # native APIs and writer policy, no paid model
 test/lun.sh ../lun ../linen   # with the coordinated Lun/Linen source checkouts
@@ -213,6 +221,33 @@ invalid arguments or stdin. A recoverable tool error does not end a run.
 `.lake/build/bin/lode --help` shows usage. No arguments (or `serve`) starts
 the HTTP service as before. See [local testing](docs/local-testing.md) for
 copy-paste scripted CLI/curl tests and how to use your own repository.
+
+## Python client and scripted example
+
+```sh
+uv run Examples/guide/run.py
+uv run Examples/guide/run.py --quiet
+```
+
+The Rich-formatted client automatically starts local Lode and the sibling Lun
+service, then uses a scripted model to **generate a complete Lean project from
+a README-only repository**. It checks source types through Lake and Lean LSP,
+publishes code and `lun.json`, verifies a real Lun graph diagnostic and repair,
+and calls the compiled functions/graph. Python then retains the graph's JSON
+state and verifies input updates directly against Lun. No provider key is needed.
+
+Use `--lun ../lun --linen ../linen` for coordinated source checkouts,
+`--skip-build` for existing binaries, and `--keep` to retain local artifacts.
+With `LODE_MODEL_*` configured, `--real-model` asks the model to generate the
+same project under the same caller-owned contracts and runtime assertions.
+The [example walkthrough](Examples/guide/README.md) documents prerequisites
+and comments each stage; the [user guide](docs/user-guide.md#the-python-cookbook)
+includes reusable session, log-following and question/answer recipes.
+
+[`Examples/client.py`](Examples/client.py) is a standard-library-only HTTP client
+for attaching to an existing Lode service. Session helpers preserve server
+request fields and expose HTTP errors as `ApiError`; raw requests return
+`{status, body}` envelopes, as in Lun's Python examples.
 
 ## How a session goes
 

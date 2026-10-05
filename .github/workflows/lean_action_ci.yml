@@ -26,6 +26,8 @@ jobs:
         with:
           test: false
       - run: lake test
+      - name: Python HTTP client wire, cursor and lifecycle regressions
+        run: python3 test/python_client.py
       - name: Real Lean language-server and bounded dispatcher regressions
         run: python3 test/lsp.py
       # A real agent loop over a real repository, with a scripted model.
