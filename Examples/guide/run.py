@@ -22,6 +22,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 sys.path.insert(0, str(ROOT))
 from Examples.client import ApiError, Client  # noqa: E402
+from Examples.graph_svg import open_svg, write_graphs  # noqa: E402
 
 
 def command(args, cwd):
@@ -142,7 +143,7 @@ def script(files):
     ]
 
 
-def run_example(client, lun, remote, linen, console, quiet, real_model):
+def run_example(client, lun, remote, linen, console, quiet, real_model, svg_dir=None, browse=False):
     checks = 0
 
     def check(condition, detail):
@@ -246,6 +247,11 @@ def run_example(client, lun, remote, linen, console, quiet, real_model):
     unchanged = runtime("An unchanged input does no new work", "POST", base + "/graphs/basket",
                         {"inputs": {"value": 8}, "state": updated["state"], "now": 3000})
     check(unchanged["changed"] == [], unchanged)
+    if svg_dir is not None:
+        for path in write_graphs(built, svg_dir, snapshots={"basket": updated}):
+            console.print("SVG: " + path.as_uri(), markup=False, soft_wrap=True)
+            if browse and not open_svg(path):
+                console.print("Could not open the browser; open the file URI manually.", markup=False)
     console.print(f"{checks} checks passed: generated Lean project and Lun graph; commit {head}; build {build}.",
                   markup=False, soft_wrap=True)
 
@@ -260,8 +266,12 @@ def main():
     parser.add_argument("--skip-build", action="store_true", help="use already-built Lode and Lun binaries")
     parser.add_argument("--quiet", action="store_true", help="print just setup progress and the verification summary")
     parser.add_argument("--keep", action="store_true", help="keep the bare repository, service state and logs")
+    parser.add_argument("--svg", type=Path, help="save graph SVGs in this directory")
+    parser.add_argument("--open-svg", action="store_true", help="open exported SVGs in the default browser (requires --svg)")
     parser.add_argument("--temp-root", type=Path, default=Path("/tmp"), help="existing scratch directory with plain path components")
     args = parser.parse_args()
+    if args.open_svg and args.svg is None:
+        parser.error("--open-svg requires --svg DIRECTORY so the SVG survives demo cleanup")
     lun_root, linen = args.lun.resolve(), args.linen.resolve()
     if not args.skip_build:
         command(["lake", "build", "lode"], ROOT)
@@ -281,7 +291,7 @@ def main():
         model_env = {k: v for k, v in os.environ.items() if k.startswith("LODE_MODEL_")} if args.real_model else {}
         client = stack.enter_context(LocalServer(ROOT / ".lake/build/bin/lode", work, "LODE",
                                                  {**model_env, "LODE_LUN_URL": lun.base_url, "LODE_LUN_TOKEN": "guide-local"}))
-        run_example(client, lun, remote, linen, Console(), args.quiet, args.real_model)
+        run_example(client, lun, remote, linen, Console(), args.quiet, args.real_model, args.svg, args.open_svg)
 
 
 if __name__ == "__main__":

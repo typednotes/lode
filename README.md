@@ -122,6 +122,13 @@ complete Lean project and validates a Lun graph, run
 `uv run Examples/guide/run.py`. See the
 [commented Python walkthrough](Examples/guide/README.md).
 
+For an interactive conversation and a prompt to test the published functions
+and graphs through Lun, run `uv run Examples/interactive/run.py`. Start with
+`/demo`, then `/lun`; add `--real-model` with `LODE_MODEL_*` configured to write
+and revise your own projects. See the [interactive walkthrough](Examples/interactive/README.md).
+At the Lun prompt, `viz basket` opens the compiled graph as an SVG in your
+browser; `svg basket` saves it. The guide also supports `--svg ./graph-svg --open-svg`.
+
 ### Build
 
 ```sh
@@ -135,6 +142,7 @@ lake test          # unit tests (#guard): every parser and pure rule
 test/e2e.sh                   # a real agent loop (scripted model) over a real repository
 python3 test/cli.py           # native stdin/stdout/stderr, local Git/Lake, resume and failures
 python3 test/python_client.py # HTTP client wire shapes, cursors, questions, deadlines and errors
+python3 test/graph_svg.py     # graph SVG topology, outcomes, escaping and exports
 uv run Examples/guide/run.py --quiet # real Python → Lode → Git/Lean/LSP → Lun graph pipeline
 test/liaison.sh               # GitHub, GitLab and the model through a mock liaison
 python3 test/native.py .lake/build/bin/lode  # native APIs and writer policy, no paid model

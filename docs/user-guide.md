@@ -187,6 +187,15 @@ state are cleaned up on exit. The [commented walkthrough](../Examples/guide/READ
 explains each stage, and [section 9](#the-python-generation-example-step-by-step)
 explains the generated Lean/graph contract.
 
+For an interactive version, run `uv run Examples/interactive/run.py`. Enter
+`/demo`, answer Lode's question, then `/lun` to call functions and change graph
+inputs yourself. With `--real-model`, type your own tasks, try the published
+result, return with `back`, and ask for revisions in the same conversation.
+See the [interactive walkthrough](../Examples/interactive/README.md).
+At its Lun prompt, `viz basket` opens an SVG of the compiled topology and latest
+node outcomes; `svg basket` saves without opening. The noninteractive guide can
+export the same view with `--svg ./graph-svg --open-svg`.
+
 ## 3. Choose a real model
 
 Real tasks need a tool-capable generative model. Choose **one** configuration

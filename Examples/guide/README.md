@@ -7,6 +7,12 @@ uv run Examples/guide/run.py
 uv run Examples/guide/run.py --quiet
 ```
 
+For a conversation prompt and interactive runtime testing, use
+`uv run Examples/interactive/run.py`: `/demo` generates this project, then
+`/lun` lets you call its functions and update graph inputs yourself.
+See the [interactive walkthrough](../interactive/README.md), including
+`--real-model` for open-ended tasks and revisions.
+
 Like Lun's cookbook, this is a Rich-formatted Python script with inline `uv`
 dependency metadata. It builds Lode and the sibling `../lun`, starts both local
 HTTP services, creates a disposable bare Git repository, follows the agent log,
@@ -79,6 +85,36 @@ The default run ends with **31 checks passed**, a commit SHA and a Lun build id.
 appears on stderr. Service processes are stopped on exit. Scratch files are
 removed unless `--keep` is selected; after cleanup the printed build id no
 longer identifies a retained local service build. Use `--keep` for inspection.
+
+## Export a graph SVG
+
+Save Lun's compiled topology with the latest example values, and optionally
+open it in your default browser:
+
+```sh
+uv run Examples/guide/run.py --svg ./graph-svg
+uv run Examples/guide/run.py --svg ./graph-svg --open-svg
+```
+
+The output directory is independent of the disposable service state, so the
+SVG survives cleanup. The renderer uses Python's standard library. Input and
+function cards are connected by arrows labelled with argument positions; the
+example snapshot displays `value=8`, `double=16`, `seed=10` and `add=26`.
+
+In the [interactive example](../interactive/README.md), `svg basket` saves and
+`viz basket` opens the view. Exported files update after graph calls; refresh
+the browser to see the latest outcome.
+
+The shared [`Examples/graph_svg.py`](../graph_svg.py) can also render saved
+Lun JSON (raw response bodies or the Python client's `{status, body}` envelope):
+
+```sh
+python3 Examples/graph_svg.py build.json --output ./graph-svg --open
+python3 Examples/graph_svg.py build.json --snapshot basket-step.json --graph basket --output ./graph-svg
+```
+
+`build.json` is a saved **GET `/v0/builds/ID` response**, not a build request.
+The optional snapshot is a saved graph-step response from that same build.
 
 ## Try a real model
 
