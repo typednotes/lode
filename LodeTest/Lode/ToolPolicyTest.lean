@@ -26,7 +26,8 @@ def policy (names : List String) := Policy.parse (toJson names)
 
 -- The execution witness bounds actual parsed arguments, independently of the
 -- model's name and advertised schema. This is kernel-checked, not a #guard.
-example (p : BoundedPolicy ceiling) (a : AuthorizedArgs p.policy agent) :
+example (ceiling : Policy) (agent : List String) (p : BoundedPolicy ceiling)
+    (a : AuthorizedArgs p.policy agent) :
     ceiling.permits a.args.operation := AuthorizedArgs.authority_bounded p a
 
 def launch := Json.mkObj [("source", Json.mkObj [("url", "file:///tmp/fixture"), ("branch", "main")]),

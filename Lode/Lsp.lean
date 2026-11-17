@@ -118,6 +118,8 @@ def within (root file : FilePath) : Prop := (components root).isPrefixOf (compon
 instance (root file : FilePath) : Decidable (within root file) :=
   inferInstanceAs (Decidable ((components root).isPrefixOf (components file) = true))
 
+variable {root : FilePath}
+
 /-- Validated canonical file and bounded UTF-8 disk snapshot. The OS realpath,
     regular-file check and subsequent open are the trusted filesystem boundary. -/
 structure WorkspaceDocument (root : FilePath) where

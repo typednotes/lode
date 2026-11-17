@@ -23,7 +23,7 @@ user's actions.
 | Task | Command |
 | --- | --- |
 | Install | Lean toolchain from `lean-toolchain` via [elan](https://github.com/leanprover/elan); `git`, `bash`, `jq` and linen's native build dependencies (see `Dockerfile`); `lake build` fetches the dependencies pinned in `lake-manifest.json` |
-| Type-check | `lake build` |
+| Type-check | `lake build --wfail` |
 | Test | `lake test`; `bash ci/test-require-main-ci.sh`; `test/e2e.sh`; `python3 test/cli.py`; `python3 test/python_client.py`; `python3 test/graph_svg.py`; `python3 test/lsp.py`; `test/liaison.sh`; `python3 test/native.py .lake/build/bin/lode`; `test/lun.sh ../lun ../linen` (see Running tests) |
 | Build / release | `lake build lode`; `docker build -t lode .`; release: a `v*.*.*` tag pushed by the user triggers `.github/workflows/docker-publish.yml` |
 | CLI (applications) | `lake exe lode --help` |
@@ -161,7 +161,7 @@ experiments are logged too.
 ### Types: use the strongest standard checking the language offers, maximally
 
 - Use the standard type-checker of the language/framework in its strictest practical mode, run it in
-  CI, and keep it at zero errors. In this project: Lean 4 (toolchain `leanprover/lean4:v4.34.0`, pinned in `lean-toolchain`), type-checked by `lake build`, with every theorem checked by Lean's kernel. `lakefile.lean` sets no `leanOptions` or `moreLeanArgs`, so `autoImplicit` and `relaxedAutoImplicit` are at Lean's defaults (enabled), and neither the lakefile nor CI (`leanprover/lean-action@v1` without `build-args`) uses `--wfail` or `warningAsError`: warnings, including `declaration uses 'sorry'`, do not fail the build. "No `sorry`" and "no `partial def`" are project conventions (see Project-specific notes), not compiler-enforced settings.
+  CI, and keep it at zero errors. In this project: Lean 4 (toolchain `leanprover/lean4:v4.34.0`, pinned in `lean-toolchain`), type-checked by `lake build`, with every theorem checked by Lean's kernel. `lakefile.lean` turns `autoImplicit` and `relaxedAutoImplicit` off for the package (`leanOptions`), and CI builds with `--wfail` (`leanprover/lean-action@v1` `build-args`): warnings, including `declaration uses 'sorry'`, fail the build. Run `lake build --wfail` locally. "No `partial def`" remains a project convention (see Project-specific notes), not a compiler-enforced setting.
 - Make illegal states unrepresentable: precise types, enums/sum types over strings and flags, new
   types for identifiers and units, immutable data by default. Avoid `Any`, casts and ignores; when
   one is unavoidable, scope it narrowly and justify it in a comment.

@@ -236,8 +236,8 @@ def AuthorizedArgs.check (policy : Policy) (agent : List String) (args : Args) :
     else .error s!"the tool '{args.operation.name}' is not available to this agent"
   else .error s!"the tool '{args.operation.name}' is denied by the session tool policy"
 
-theorem AuthorizedArgs.authority_bounded (bounded : BoundedPolicy ceiling)
-    (a : AuthorizedArgs bounded.policy agent) : ceiling.permits a.args.operation :=
+theorem AuthorizedArgs.authority_bounded {ceiling : Policy} {agent : List String}
+    (bounded : BoundedPolicy ceiling) (a : AuthorizedArgs bounded.policy agent) : ceiling.permits a.args.operation :=
   bounded.bounded _ a.policyAllows
 
 /-- A lake target a model may name: letters, digits, `_`, `.`, `:`, `+`, `/`
@@ -597,7 +597,7 @@ private def runUnchecked (env : Env) : Args → IO (String × Bool)
 
 /-- Run a tool call, if the agent has that tool; every failure becomes an
     error result for the model, never an exception. -/
-def run (env : Env) (authorized : AuthorizedArgs policy agent) : IO (String × Bool) :=
+def run {policy : Policy} {agent : List String} (env : Env) (authorized : AuthorizedArgs policy agent) : IO (String × Bool) :=
   runUnchecked env authorized.args
 
 /-- Parse then authorize the exact operation before any tool IO. -/

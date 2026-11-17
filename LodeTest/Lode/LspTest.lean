@@ -10,14 +10,15 @@ namespace LodeTests.Lsp
 -- Kernel witnesses travel to execution, not merely the advertised schema.
 example (q : Query) : q.method ∈ ["textDocument/hover", "textDocument/definition",
     "textDocument/completion", "textDocument/waitForDiagnostics", "$/lean/plainGoal"] := q.read_only
-example (d : WorkspaceDocument root) : within root d.path := d.scope_confined
-example (d : WorkspaceDocument root) : d.text.utf8ByteSize ≤ maxDocumentBytes := d.size_bounded
+example (root : System.FilePath) (d : WorkspaceDocument root) : within root d.path := d.scope_confined
+example (root : System.FilePath) (d : WorkspaceDocument root) : d.text.utf8ByteSize ≤ maxDocumentBytes := d.size_bounded
 example (p : DocumentPath) : validDocumentPath p.value = true := p.validated
-example (p : WorkspaceLocation root) : within root p.path := p.scope_confined
-example (p : WorkspaceLocation root) : validDocumentPath p.relative = true := p.relative_valid
-example (r : Request root) (p : Lean.Lsp.Position) (h : p ∈ r.position) :
+example (root : System.FilePath) (p : WorkspaceLocation root) : within root p.path := p.scope_confined
+example (root : System.FilePath) (p : WorkspaceLocation root) : validDocumentPath p.relative = true := p.relative_valid
+example (root : System.FilePath) (r : Request root) (p : Lean.Lsp.Position) (h : p ∈ r.position) :
     validPosition r.document.text p = true := r.positionValid p h
-example (bounded : BoundedPolicy ceiling) (a : AuthorizedArgs bounded.policy agent) :
+example (ceiling : Policy) (agent : List String) (bounded : BoundedPolicy ceiling)
+    (a : AuthorizedArgs bounded.policy agent) :
     ceiling.permits a.args.operation := AuthorizedArgs.authority_bounded bounded a
 
 #guard ["Demo.lean", "Demo/Math.lean", "résumé/hello world.lean"].all validDocumentPath

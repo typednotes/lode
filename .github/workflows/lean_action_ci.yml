@@ -25,6 +25,7 @@ jobs:
       - uses: leanprover/lean-action@v1
         with:
           test: false
+          build-args: "--wfail"
       - run: lake test
       - name: Python HTTP client wire, cursor and lifecycle regressions
         run: python3 test/python_client.py

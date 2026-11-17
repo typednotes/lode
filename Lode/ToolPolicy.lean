@@ -60,6 +60,8 @@ structure BoundedPolicy (ceiling : Policy) where
 def BoundedPolicy.initial (ceiling : Policy) : BoundedPolicy ceiling :=
   ⟨ceiling, Policy.Narrows.refl ceiling⟩
 
+variable {ceiling : Policy}
+
 def BoundedPolicy.narrow (old : BoundedPolicy ceiling) (next : Policy) :
     Except String (BoundedPolicy ceiling) :=
   if h : ∀ op ∈ next.allowed, op ∈ old.policy.allowed then
