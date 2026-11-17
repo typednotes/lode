@@ -29,7 +29,10 @@ signature ending in linen's `Eff`), **graphs** wiring them, and the `lun.json`
 declaring both. A session is done when lun builds the published commit and the
 functions and graphs answer as intended.
 
-The current local release is **Lode 0.5.0**, coordinated with **Lun 0.4.1 /
+The current local release is **Lode 0.5.1**: runnable Python examples
+(scripted and interactive generation, a client, graph SVGs) and a stricter build
+over **0.5.0**. See [its release notes](docs/release-0.5.1.md). Lode 0.5.0 is
+coordinated with **Lun 0.4.1 /
 Typednotes 0.11.0 / Linen 1.12.0 / Liaison 0.6.0 SDK**. It adds background checkout,
 immutable retry identities and bounded user questions; package/image/new-project
 defaults select Linen 1.12.0. Release commits/tags require publication before
