@@ -1,2 +1,7 @@
 .lake/
 __pycache__/
+
+# agents-md standard: local, generated and cached content
+reviews/
+output/
+.cache/
