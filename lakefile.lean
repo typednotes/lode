@@ -19,7 +19,6 @@ require lun from git "https://github.com/typednotes/lun" @ "291ae06d8f9471406540
 package lode where
   version := v!"0.5.1"
   testDriver := "LodeTest"
-  leanOptions := #[⟨`autoImplicit, false⟩, ⟨`relaxedAutoImplicit, false⟩]
 
 @[default_target]
 lean_lib Lode where

@@ -7,6 +7,12 @@ Releases before 0.5.1 are described in their git tags and in `docs/release-*.md`
 
 ## [Unreleased]
 
+### Changed
+
+- `autoImplicit` is back to Lean's default (on): it automates implicit binders,
+  which are still fully checked, so it is not a weakening (agents-md standard v4).
+  Warnings still fail the build (`lake build --wfail`).
+
 ## [0.5.1] — 2026-11-17
 
 ### Added
