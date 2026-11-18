@@ -475,6 +475,9 @@ private def worker (project : FilePath) (abort : IO.Ref Bool) (timeoutMs : Nat)
     let _ ← child.wait
     -- Killing the group closes both pipes and joins the bounded reader task.
     let _ ← IO.wait task
+    -- Keep the client's write end alive until the exchange is over. Otherwise
+    -- its last use is the final send and Lean's server shuts down on stdin EOF.
+    try stdin.flush catch _ => pure ()
 
 /-- Called only from the authorized Tools dispatcher. No session Env additions.
     Filesystem/OS errors are deliberately not reflected as raw host paths. -/
