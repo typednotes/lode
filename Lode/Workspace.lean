@@ -441,7 +441,7 @@ def linenRev? (manifest : String) : Option String := do
   let linen ← m.packages.find? (·.name == `linen)
   match linen.src with
   | .git _ rev _ _ => if Validate.commit rev then some rev else none
-  | .path _ => none
+  | .path .. => none
 
 /-- Seed the project's linen from the package cache (`{cache}/linen/{rev}`,
     a built linen checkout, as lun's image carries one), when the manifest
