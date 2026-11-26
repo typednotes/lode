@@ -67,8 +67,9 @@ structure Config where
   /-- Pre-built packages: `{cache}/linen/{rev}`. -/
   packageCache : Option FilePath := none
   /-- What new projects should require. -/
-  linenRev : String := "v1.12.0"
-  toolchain : String := "leanprover/lean4:v4.34.0"
+  linenRev : String := "v3.0.0"
+  /-- The Lean toolchain for new projects. -/
+  toolchain : String := "leanprover/lean4:v4.36.0"
 
 -- ── Time ────────────────────────────────────────────────────────────────────
 

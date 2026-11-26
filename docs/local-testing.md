@@ -220,3 +220,16 @@ test/e2e.sh
 The native tests cover stdin/streams, compilation/publication, session resume,
 local default-model transport, tool-policy denial and failure exits. The curl
 suite additionally covers steering, abort, diff, authentication and restart.
+
+### Lun integration on macOS
+
+The Lun end-to-end job runs on Ubuntu. For a local macOS run, set `TMPDIR=/tmp`
+when invoking `test/lun.sh` so the fixture generates valid `file://` URLs.
+
+With Linen 3.0.0 and the Lun revision pinned by CI, macOS can build the
+generated driver but fail to load it with `symbol not found in flat namespace
+'_lean_notify_assert'`. In a disposable Lun checkout, append
+`-Wl,-u,_lean_notify_assert` to the macOS driver link arguments in
+`Lun/Build.lean` to retain that symbol. If Lean's bundled linker rejects
+`arm64e.x1` SDK stubs, set `SDKROOT` to an installed SDK it supports, such as
+`$(xcrun --sdk macosx26.5 --show-sdk-path)`.

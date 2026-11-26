@@ -18,7 +18,7 @@ jobs:
         run: bash ci/test-require-main-ci.sh
       # linen's native build dependencies (it builds its FFI as a dependency),
       # from linen's own list at the version lode requires.
-      - uses: typednotes/linen/.github/actions/setup-native-deps@v1.10.0
+      - uses: typednotes/linen/.github/actions/setup-native-deps@v3.0.0
         with:
           keyring: false
       - run: sudo apt-get install -y jq
@@ -40,9 +40,8 @@ jobs:
       # The GitHub/GitLab and model paths, against a mock liaison.
       - run: test/liaison.sh
 
-  # lode against a real lun (>= 0.2.0: functions and graphs, on linen's released
-  # `Control.Reactive`), with a linen checkout for the test project's path
-  # dependency, both next to lode, as `test/lun.sh` expects.
+  # lode against real Lun on Lean 4.36, with a Linen checkout for the test
+  # project's path dependency, both next to lode as `test/lun.sh` expects.
   lun:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -53,14 +52,14 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: typednotes/lun
-          ref: ${{ vars.LUN_E2E_REF || 'v0.3.0' }}
+          ref: ${{ vars.LUN_E2E_REF || 'b98f06bbd809178dbb345b230289b2f4e894666a' }}
           path: lun
       - uses: actions/checkout@v7
         with:
           repository: typednotes/linen
-          ref: ${{ vars.LINEN_E2E_REF || 'v1.10.0' }}
+          ref: ${{ vars.LINEN_E2E_REF || 'v3.0.0' }}
           path: linen
-      - uses: typednotes/linen/.github/actions/setup-native-deps@v1.10.0
+      - uses: typednotes/linen/.github/actions/setup-native-deps@v3.0.0
         with:
           keyring: false
       - run: sudo apt-get install -y jq

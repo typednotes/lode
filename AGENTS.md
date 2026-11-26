@@ -15,9 +15,10 @@ git repository and writes the Lean projects `lun` builds and serves
 has no `cells`/`dags` aliases, and neither has lode). lode is the writer; lun is the runner — do not confuse
 the two. See `README.md` for the API and the design.
 
-Coordinated release set: **Lode 0.4.2 / Lun 0.3.0 / Typednotes 0.7.2 /
-Linen 1.10.0 / Liaison 0.6.0**. Package locks, image defaults and new-project
-defaults use this set. Publishing local release tags and deploying remain the
+Lode **0.5.2** uses **Linen 3.0.0** in its package lock, image cache, and
+new-project defaults. The historical **Lode 0.4.2 / Lun 0.3.0 / Typednotes
+0.7.2 / Linen 1.10.0 / Liaison 0.6.0** release set is documented in
+[its release notes](docs/release-0.4.2.md). Publishing local release tags and deploying remain the
 user's actions.
 
 | Task | Command |
@@ -193,7 +194,7 @@ experiments are logged too.
 ### Types: use the strongest standard checking the language offers, maximally
 
 - Use the standard type-checker of the language/framework in its strictest practical mode, run it in
-  CI, and keep it at zero errors. In this project: Lean 4 (toolchain `leanprover/lean4:v4.34.0`, pinned in `lean-toolchain`), type-checked by `lake build`, with every theorem checked by Lean's kernel. `autoImplicit` stays on (Lean's default: it only automates implicit binders, which are still fully checked), and CI builds with `--wfail` (`leanprover/lean-action@v1` `build-args`): warnings, including `declaration uses 'sorry'`, fail the build. Run `lake build --wfail` locally. "No `partial def`" remains a project convention (see Project-specific notes), not a compiler-enforced setting.
+  CI, and keep it at zero errors. In this project: Lean 4 (toolchain `leanprover/lean4:v4.36.0`, pinned in `lean-toolchain`), type-checked by `lake build`, with every theorem checked by Lean's kernel. `autoImplicit` stays on (Lean's default: it only automates implicit binders, which are still fully checked), and CI builds with `--wfail` (`leanprover/lean-action@v1` `build-args`): warnings, including `declaration uses 'sorry'`, fail the build. Run `lake build --wfail` locally. "No `partial def`" remains a project convention (see Project-specific notes), not a compiler-enforced setting.
 - Make illegal states unrepresentable: precise types, enums/sum types over strings and flags, new
   types for identifiers and units, immutable data by default. Avoid `Any`, casts and ignores; when
   one is unavoidable, scope it narrowly and justify it in a comment.

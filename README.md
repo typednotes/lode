@@ -13,8 +13,8 @@
   <a href="https://github.com/typednotes/lode/actions/workflows/docker-publish.yml"><img src="https://github.com/typednotes/lode/actions/workflows/docker-publish.yml/badge.svg" alt="Docker publish"></a>
   <a href="https://github.com/typednotes/lode/pkgs/container/lode"><img src="https://img.shields.io/badge/ghcr.io-typednotes%2Flode-blue?logo=docker" alt="Docker image"></a>
   <a href="https://github.com/typednotes/lode/tags"><img src="https://img.shields.io/github/v/tag/typednotes/lode?label=version&sort=semver" alt="Version"></a>
-  <a href="https://lean-lang.org/"><img src="https://img.shields.io/badge/Lean-v4.34.0-blue" alt="Lean v4.34.0"></a>
-   <a href="https://github.com/typednotes/linen"><img src="https://img.shields.io/badge/built%20on-linen%20v1.12.0-c9b896" alt="Built on linen v1.12.0"></a>
+  <a href="https://lean-lang.org/"><img src="https://img.shields.io/badge/Lean-v4.36.0-blue" alt="Lean v4.36.0"></a>
+   <a href="https://github.com/typednotes/linen"><img src="https://img.shields.io/badge/built%20on-linen%20v3.0.0-c9b896" alt="Built on linen v3.0.0"></a>
    <a href="https://github.com/typednotes/liaison"><img src="https://img.shields.io/badge/speaks-liaison%20v0.6.0-0e6b6f" alt="Speaks liaison v0.6.0"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License: Apache 2.0"></a>
 </p>
@@ -29,14 +29,14 @@ signature ending in linen's `Eff`), **graphs** wiring them, and the `lun.json`
 declaring both. A session is done when lun builds the published commit and the
 functions and graphs answer as intended.
 
-The current local release is **Lode 0.5.1**: runnable Python examples
+**Lode 0.5.2** uses Linen 3.0.0 and Lean 4.36.0 for its build and new
+projects. See the [changelog](CHANGELOG.md). **Lode 0.5.1** introduced runnable Python examples
 (scripted and interactive generation, a client, graph SVGs) and a stricter build
 over **0.5.0**. See [its release notes](docs/release-0.5.1.md). Lode 0.5.0 is
 coordinated with **Lun 0.4.1 /
 Typednotes 0.11.0 / Linen 1.12.0 / Liaison 0.6.0 SDK**. It adds background checkout,
-immutable retry identities and bounded user questions; package/image/new-project
-defaults select Linen 1.12.0. Release commits/tags require publication before
-deployment. See [the release contract](docs/release-0.5.0.md).
+immutable retry identities and bounded user questions. See [the release
+contract](docs/release-0.5.0.md).
 
 The earlier **0.4.3** implementation added immutable caller-pinned output/source/
 wiring contracts and explicit graph/parent checks through the existing Lean LSP
@@ -407,7 +407,7 @@ isError}]`), `compaction` (`summary`, `firstKept`), `event` (`kind`:
 | `LODE_MAX_STEPS` | `200` | model calls per run |
 | `LODE_MODEL_TIMEOUT` / `LODE_GIT_TIMEOUT` / `LODE_CHECK_TIMEOUT` | `600` / `600` / `1800` | seconds |
 | `LODE_PACKAGE_CACHE` | — | pre-built linen checkouts, `{cache}/linen/{rev}` |
-| `LODE_LINEN_REV` / `LODE_TOOLCHAIN` | `v1.10.0` / `leanprover/lean4:v4.34.0` | what new projects are told to use |
+| `LODE_LINEN_REV` / `LODE_TOOLCHAIN` | `v3.0.0` / `leanprover/lean4:v4.36.0` | what new projects are told to use |
 | `LODE_ALLOW_LOCAL` | — | `1`: `file://` repositories, HTTP model endpoints and the `scripted` model for local development/testing; enabled automatically by `run` |
 
 ## Docker
@@ -432,10 +432,10 @@ the image job checks out the verified SHA and uses `packages: write` to build
 and publish, without repeating the full CI suite on tags.
 
 The image carries the Lean toolchain and linen
-(`LINEN_REF`, coordinated target `v1.10.0`) pre-built in the package
+(`LINEN_REF` defaults to `v3.0.0`) pre-built in the package
 cache, so a workspace locked to that revision does not rebuild linen.
 
-Use Lode `0.4.2` with Lun `0.3.0`, Liaison `0.6.0` and
+The Lode `0.4.2` release set used Lun `0.3.0`, Liaison `0.6.0` and
 Linen `1.10.0`. Historical `0.1.x` cell/DAG deployments do not implement this
 native authority contract. Registry/tag publication is release-parent-owned.
 
