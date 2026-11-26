@@ -29,14 +29,15 @@ signature ending in linen's `Eff`), **graphs** wiring them, and the `lun.json`
 declaring both. A session is done when lun builds the published commit and the
 functions and graphs answer as intended.
 
-**Lode 0.5.2** uses Linen 3.0.0 and Lean 4.36.0 for its build and new
-projects. See the [changelog](CHANGELOG.md). **Lode 0.5.1** introduced runnable Python examples
-(scripted and interactive generation, a client, graph SVGs) and a stricter build
-over **0.5.0**. See [its release notes](docs/release-0.5.1.md). Lode 0.5.0 is
+**Lode 0.6.0** adds operator settings, managed and session-local model keys,
+compiled Lean extensions and an MCP stdio adapter. See the
+[release notes](docs/release-0.6.0.md). **Lode 0.5.1** introduced runnable
+Python examples and graph SVGs. Lode 0.5.0 was
 coordinated with **Lun 0.4.1 /
 Typednotes 0.11.0 / Linen 1.12.0 / Liaison 0.6.0 SDK**. It adds background checkout,
 immutable retry identities and bounded user questions. See [the release
-contract](docs/release-0.5.0.md).
+contract](docs/release-0.5.0.md). Lode 0.6.0 builds with Linen 3.0.0 and uses it
+with Lean 4.36.0 for new projects.
 
 The earlier **0.4.3** implementation added immutable caller-pinned output/source/
 wiring contracts and explicit graph/parent checks through the existing Lean LSP
@@ -44,12 +45,13 @@ tool. Unpinned outputs may evolve coherently; user pins are retained in actual
 Lun builds. See [build contracts](docs/build-contracts.md) and
 [the release contract](docs/release-0.4.3.md).
 
-lode holds no third-party credential: it reaches the repository (GitHub,
-GitLab) and supported generative models using Messages, Chat Completions,
-Responses, Gemini or Radius Pi/SSE through [`liaison`](https://github.com/typednotes/liaison/tree/main), with
-warrants the typednotes app mints for each connection, in liaison's own wire
-format (`Liaison.Wire`). It is built on
-[`linen`](https://github.com/typednotes/linen/tree/main) and runs as a container.
+Lode uses Typednotes warrants for brokered GitHub, GitLab, and model calls.
+Operators can also configure a direct model endpoint and supply its key at
+startup, through Secrets, or through an authenticated session handoff. Lode is
+built on Linen and runs as an HTTP service in a container or directly as a
+native stdio command. [Architecture](docs/architecture/lode.md),
+[Liaison](https://github.com/typednotes/liaison/tree/main),
+[Linen](https://github.com/typednotes/linen/tree/main).
 
 ```
  user / typednotes app ──HTTP──▶ lode ──(warrant)──▶ liaison ──▶ GitHub / GitLab              open, publish
@@ -59,7 +61,7 @@ format (`Liaison.Wire`). It is built on
 
 ## Table of contents
 
-- [Illustrated user guide](docs/user-guide.md)
+- [Documentation](docs/README.md)
 - [Features](#features)
 - [Quick start](#quick-start)
 - [Native CLI](#native-cli)
@@ -144,6 +146,8 @@ lake build
 lake test          # unit tests (#guard): every parser and pure rule
 test/e2e.sh                   # a real agent loop (scripted model) over a real repository
 python3 test/cli.py           # native stdin/stdout/stderr, local Git/Lake, resume and failures
+python3 test/settings.py      # TOML/JSON, Secrets, direct key handoff and compiled tool policy
+lake exe lode-mcp-smoke       # MCP stdio subprocess fixture
 python3 test/python_client.py # HTTP client wire shapes, cursors, questions, deadlines and errors
 python3 test/graph_svg.py     # graph SVG topology, outcomes, escaping and exports
 uv run Examples/guide/run.py --quiet # real Python → Lode → Git/Lean/LSP → Lun graph pipeline
@@ -289,6 +293,7 @@ naming the commit, the lun build and the services.
 | `bash` | a non-interactive command in the project directory (timeout ≤ 1800 s; last 2000 lines / 50 kB) |
 | `todo` | the model's task list (visible in the session's status) |
 | `check` | `lake build` (optionally of some targets): its errors and warnings |
+| `extension` | call a tool selected when compiling Lode. The build agent requires an explicit launch grant for `extension` |
 | `publish` | publish project changes through a broker-owned, scope-checked atomic commit plan; removals need independent deletion grants |
 | `lun_build` | have lun build the published commit with `lun.json`; wait; report state, diagnostics, functions, graphs |
 | `lun_call` | call a function, or run a graph once, of the latest ready build |
@@ -334,6 +339,7 @@ rebuild the project from the repository alone.
 | `GET /v0/sessions/{id}/messages?after=n&wait=s` | `{"entries": [...], "next", "running"}`: the log from entry `n`; `wait` (≤ 60 s) holds the request until something new happens |
 | `POST /v0/sessions/{id}/abort` | `202`, or `409` if no run is going |
 | `PUT /v0/sessions/{id}/credentials` | `{"repo"?, "model"?, "lun"?}`: fresh warrants |
+| `PUT /v0/sessions/{id}/model-key` | `{"apiKey":"…"}` sets a memory-only direct key. `{"apiKey":null}` clears it. Requires configured bearer authentication and the operator's model endpoint and protocol. Eligible status responses include `modelKeyUrl` |
 | `GET /v0/sessions/{id}/diff` | unpublished changes, `text/plain` |
 
 With `LODE_TOKEN` set, every route but `/_health` needs
@@ -394,21 +400,31 @@ isError}]`), `compaction` (`summary`, `firstKept`), `event` (`kind`:
 
 ## Configuration
 
-| Variable | Default | |
+`lode serve --settings FILE` and `lode run --settings FILE` select an operator
+TOML or JSON file. The flag takes precedence over `LODE_SETTINGS`. Environment
+variables override individual values. `lode run --config FILE` still selects
+the session request. See the [settings example](docs/architecture/lode.md#operator-settings).
+
+| Settings key | Environment override | Built-in default |
 |---|---|---|
-| `LODE_PORT` | `8080` | |
-| `LODE_WORKDIR` | `/var/lib/lode` (HTTP), `$HOME/.local/state/lode` (CLI) | sessions: `sessions/{id}/{session.json,log.jsonl,checkout/}` |
-| `LODE_TOKEN` | — | bearer token for the API; unset means unauthenticated (logged loudly) |
-| `LODE_LIAISON_URL` | — | liaison, for GitHub/GitLab repositories and models with credentials |
-| `LODE_LUN_URL`, `LODE_LUN_TOKEN` | — | lun, for `lun_build` / `lun_call` |
-| `LODE_LUN_BUILD_TIMEOUT` / `LODE_LUN_CALL_TIMEOUT` | `3600` / `120` | seconds |
-| `LODE_MODEL_API`, `LODE_MODEL_NAME`, `LODE_MODEL_BASE_URL`, `LODE_MODEL_MAX_TOKENS`, `LODE_MODEL_CONTEXT_WINDOW` | — | the server's default model |
-| `LODE_MODEL_API_KEY` | — | development: a key sent directly to the default model's endpoint (and only there) |
-| `LODE_MAX_STEPS` | `200` | model calls per run |
-| `LODE_MODEL_TIMEOUT` / `LODE_GIT_TIMEOUT` / `LODE_CHECK_TIMEOUT` | `600` / `600` / `1800` | seconds |
-| `LODE_PACKAGE_CACHE` | — | pre-built linen checkouts, `{cache}/linen/{rev}` |
-| `LODE_LINEN_REV` / `LODE_TOOLCHAIN` | `v3.0.0` / `leanprover/lean4:v4.36.0` | what new projects are told to use |
-| `LODE_ALLOW_LOCAL` | — | `1`: `file://` repositories, HTTP model endpoints and the `scripted` model for local development/testing; enabled automatically by `run` |
+| `port` | `LODE_PORT` | `8080` |
+| `workdir` | `LODE_WORKDIR` | `/var/lib/lode` (HTTP), `$HOME/.local/state/lode` (CLI) |
+| `liaisonUrl` | `LODE_LIAISON_URL` | — |
+| `lunUrl` | `LODE_LUN_URL` | — |
+| `lunBuildTimeout`, `lunCallTimeout` | `LODE_LUN_BUILD_TIMEOUT`, `LODE_LUN_CALL_TIMEOUT` | 3600 / 120 seconds |
+| `model.provider`, `model.api`, `model.name`, `model.baseUrl` | `LODE_MODEL_PROVIDER`, `LODE_MODEL_API`, `LODE_MODEL_NAME`, `LODE_MODEL_BASE_URL` | Matching provider and model defaults when configured |
+| `model.maxTokens`, `model.contextWindow` | `LODE_MODEL_MAX_TOKENS`, `LODE_MODEL_CONTEXT_WINDOW` | 8192 / 200000 (Anthropic) or 128000 (other protocols) |
+| `secrets.baseUrl`, `secrets.modelKeyPath` | `LODE_SECRETS_URL`, `LODE_SECRETS_MODEL_KEY_PATH` | — |
+| `maxSteps` | `LODE_MAX_STEPS` | 200 model calls per run |
+| `modelTimeout`, `gitTimeout`, `checkTimeout` | `LODE_MODEL_TIMEOUT`, `LODE_GIT_TIMEOUT`, `LODE_CHECK_TIMEOUT` | 600 / 600 / 1800 seconds |
+| `packageCache` | `LODE_PACKAGE_CACHE` | — |
+| `linenRev`, `toolchain` | `LODE_LINEN_REV`, `LODE_TOOLCHAIN` | `v3.0.0` / `leanprover/lean4:v4.36.0` for new projects |
+| `allowLocal` | `LODE_ALLOW_LOCAL` (`1` or `0`) | HTTP off, native stdio on |
+
+Supply `LODE_TOKEN`, `LODE_LUN_TOKEN`, `LODE_MODEL_API_KEY`, and
+`LODE_SECRETS_TOKEN` through the process environment. Use `LODE_TOKEN` to
+enable API bearer authentication. Refer to [Secrets and key rotation](docs/architecture/lode.md#models-and-credentials)
+for the managed key and direct handoff options.
 
 ## Docker
 
@@ -431,7 +447,7 @@ PR/manual CI and another commit's result do not qualify. After verification,
 the image job checks out the verified SHA and uses `packages: write` to build
 and publish, without repeating the full CI suite on tags.
 
-The image carries the Lean toolchain and linen
+The image carries the Lean toolchain and Linen
 (`LINEN_REF` defaults to `v3.0.0`) pre-built in the package
 cache, so a workspace locked to that revision does not rebuild linen.
 

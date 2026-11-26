@@ -37,6 +37,10 @@ jobs:
       - run: test/e2e.sh
       - name: Native stdin/stdout/stderr CLI over local Git
         run: python3 test/cli.py
+      - name: Operator settings and direct model key handoff
+        run: python3 test/settings.py
+      - name: Compiled MCP extension over stdio
+        run: lake exe lode-mcp-smoke
       # The GitHub/GitLab and model paths, against a mock liaison.
       - run: test/liaison.sh
 

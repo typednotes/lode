@@ -69,7 +69,7 @@ def args (operation : String := "hover") : Json := Json.mkObj [
 #guard (Args.parse "lsp" (String.ofList (List.replicate 4097 ' '))).toOption.isNone
 
 #guard Operation.parse "lsp" == .ok .lsp
-#guard Operation.all.map Operation.name == specs.toList.map (·.name)
+#guard Operation.builtin.map Operation.name == specs.toList.map (·.name)
 #guard (Policy.parse (toJson ["lsp"])).toOption.map (·.names) == some ["lsp"]
 #guard ((Args.parse "lsp" (args).compress) >>= AuthorizedArgs.check ⟨[]⟩ ["lsp"]).toOption.isNone
 #guard ((Args.parse "lsp" (args).compress) >>= AuthorizedArgs.check Policy.all ["read"]).toOption.isNone

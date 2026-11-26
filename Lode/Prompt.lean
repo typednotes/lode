@@ -34,7 +34,7 @@ structure Agent where
 def build : Agent :=
   { name := "build"
     tools := ["ask_user", "read", "ls", "grep", "write", "edit", "bash", "todo", "check", "lsp", "publish",
-              "lun_build", "lun_call"]
+              "lun_build", "lun_call", "extension"]
     note := "" }
 
 def plan : Agent :=
@@ -165,7 +165,7 @@ A declared function is a function `α₁ → … → αₙ → Eff effs β` of t
 
 ### Resumable producers and scheduling
 
-Lun 0.4.1 executes graphs in bounded stateless steps. The app persists the returned state and schedules nextCallAt (an absolute Unix-millisecond deadline); Lun workers never sleep or retain execution state. Keep user-visible cron cadence in the app. For graph-internal delays or several emissions, declare producer:true in lun.json and use a signature with graph arguments followed by `Nat → Option S → Eff effs (List B × S × Option Nat)`. The final arguments are the supplied clock and continuation, not graph inputs. outputType constrains each emitted B; caller pins and effect ceilings still apply. Return a deadline strictly after now, or none to finish. Use Linen 1.12.0's `Linen.Control.Monad.Effect.Producer` for pure sequential yield/yieldAll/wait scripts; read its source before use. Effectful producers use the explicit typed-step API so resuming does not replay earlier effects. Do not introduce background threads, process sleeps, an independent scheduler, or stored credentials. Trial a producer through its approved graph with input data only; the app owns durable state/clock/retry orchestration. Scheduled/watch source notes remain ordinary fetch functions called by the app's cron worker; place producer delays in calculation notes.
+Lun 0.4.1 executes graphs in bounded stateless steps. The app persists the returned state and schedules nextCallAt (an absolute Unix-millisecond deadline); Lun workers never sleep or retain execution state. Keep user-visible cron cadence in the app. For graph-internal delays or several emissions, declare producer:true in lun.json and use a signature with graph arguments followed by `Nat → Option S → Eff effs (List B × S × Option Nat)`. The final arguments are the supplied clock and continuation, not graph inputs. outputType constrains each emitted B; caller pins and effect ceilings still apply. Return a deadline strictly after now, or none to finish. Use `Linen.Control.Monad.Effect.Producer` for pure sequential yield/yieldAll/wait scripts; read its source before use. Effectful producers use the explicit typed-step API so resuming does not replay earlier effects. Do not introduce background threads, process sleeps, an independent scheduler, or stored credentials. Trial a producer through its approved graph with input data only; the app owns durable state/clock/retry orchestration. Scheduled/watch source notes remain ordinary fetch functions called by the app's cron worker; place producer delays in calculation notes.
 
 ### Connected effects and guarantees
 

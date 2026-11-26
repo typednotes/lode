@@ -17,7 +17,7 @@ require liaison from git "https://github.com/typednotes/liaison" @ "v0.6.0"
 require lun from git "https://github.com/typednotes/lun" @ "291ae06d8f947140654091442ed28a7acfb0d037"
 
 package lode where
-  version := v!"0.5.2"
+  version := v!"0.6.0"
   testDriver := "LodeTest"
 
 @[default_target]
@@ -25,7 +25,7 @@ lean_lib Lode where
 
 -- Named `LodeTest` (module tree `LodeTest.*`), the `{Package}Test` convention
 -- of mathlib, batteries and aesop, and the package's `testDriver` (`lake test`).
--- The guard tests run in the interpreter using their direct imports.
+-- The `#guard` tests run in Lean's interpreter and need only their imports.
 lean_lib LodeTest
 
 @[default_target]
@@ -36,3 +36,7 @@ lean_exe lode where
 -- HTTP/TLS implementation as the writer. Never part of a release default target.
 lean_exe «lode-native-smoke» where
   root := `test.NativeBrokerSmoke
+
+-- Native MCP stdio fixture, kept out of release builds.
+lean_exe «lode-mcp-smoke» where
+  root := `test.McpSmoke

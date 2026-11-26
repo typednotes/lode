@@ -7,16 +7,28 @@ Releases before 0.5.1 are described in their git tags and in `docs/release-*.md`
 
 ## [Unreleased]
 
-## [0.5.2] — 2026-11-26
+## [0.6.0] — 2026-11-26
+
+### Added
+
+- Shared operator settings in TOML or JSON for the HTTP service and native CLI.
+- Direct model presets for OpenAI, Anthropic, Scaleway, and Baseten. Direct
+  keys can come from startup, an endpoint-bound Secrets record, or an
+  authenticated in-memory session handoff.
+- Compiled Lean tools with explicit session permission. The standard binary
+  includes `lean_version`, and custom builds can call individual MCP tools
+  using the stdio adapter.
+- Architecture documentation and a specification for startup settings,
+  credential handling, and compiled tools.
 
 ### Changed
 
 - Updated Linen to 3.0.0 for Lode, the image's prebuilt package cache, and new
   projects. New projects use Lean 4.36.0, and the Lun integration job uses a
   Lean 4.36-compatible Lun revision.
-- Restored Lean's default implicit binders. Lean still checks their types,
-  and warnings still fail the build (`lake build --wfail`).
-- Run the interpreter-based Lean tests without precompiling the full Linen library.
+- `autoImplicit` is back to Lean's default (on): it automates implicit binders,
+  which are still fully checked, so it is not a weakening (agents-md standard v4).
+  Warnings still fail the build (`lake build --wfail`).
 
 ## [0.5.1] — 2026-11-17
 
@@ -35,6 +47,3 @@ Releases before 0.5.1 are described in their git tags and in `docs/release-*.md`
   language server does not see graphs written inside `lun.json`.
 - Builds are stricter: implicit auto-bound variables are disabled and CI treats
   every compiler warning as an error.
-
-[Unreleased]: https://github.com/typednotes/lode/compare/v0.5.2...HEAD
-[0.5.2]: https://github.com/typednotes/lode/compare/v0.5.1...v0.5.2

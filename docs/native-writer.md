@@ -7,7 +7,7 @@ signature, connection identities and execution ceilings rather than giving
 generated code a broader effect row.
 
 The native writer was introduced with **Lode 0.4.1, Lun 0.3.0, Typednotes
-0.7.0, Linen 1.10.0 and Liaison 0.6.0**. Lode 0.5.2 uses Linen
+0.7.0, Linen 1.10.0 and Liaison 0.6.0**. The Lode development branch uses Linen
 3.0.0 in its package lock, image cache, and new-project defaults.
 
 ## App launch contract

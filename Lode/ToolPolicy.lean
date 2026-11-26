@@ -6,7 +6,7 @@ namespace Lode.Tools
 
 /-- Unknown writer operations cannot enter a validated policy. -/
 inductive Operation where
-  | read | ls | grep | write | edit | bash | todo | check | lsp | publish | lunBuild | lunCall | askUser
+  | read | ls | grep | write | edit | bash | todo | check | lsp | publish | lunBuild | lunCall | askUser | extension
   deriving DecidableEq, Repr
 
 def Operation.name : Operation → String
@@ -14,9 +14,12 @@ def Operation.name : Operation → String
   | .edit => "edit" | .bash => "bash" | .todo => "todo" | .check => "check"
   | .lsp => "lsp" | .publish => "publish" | .lunBuild => "lun_build" | .lunCall => "lun_call"
   | .askUser => "ask_user"
+  | .extension => "extension"
 
-def Operation.all : List Operation :=
+def Operation.builtin : List Operation :=
   [.read, .ls, .grep, .write, .edit, .bash, .todo, .check, .lsp, .publish, .lunBuild, .lunCall, .askUser]
+
+def Operation.all : List Operation := Operation.builtin ++ [.extension]
 
 def Operation.parse (name : String) : Except String Operation :=
   match Operation.all.find? (·.name == name) with
@@ -30,6 +33,8 @@ structure Policy where
   deriving DecidableEq, Repr
 
 def Policy.all : Policy := ⟨Operation.all⟩
+/-- The legacy writer preset. Compiled extensions require explicit launch permission. -/
+def Policy.default : Policy := ⟨Operation.builtin⟩
 def Policy.names (p : Policy) : List String := p.allowed.map Operation.name
 def Policy.permits (p : Policy) (op : Operation) : Prop := op ∈ p.allowed
 instance (p : Policy) (op : Operation) : Decidable (p.permits op) := inferInstanceAs (Decidable (op ∈ p.allowed))
