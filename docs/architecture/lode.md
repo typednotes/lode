@@ -25,7 +25,7 @@ session request.
 
 ```toml
 toolchain = "leanprover/lean4:v4.36.0"
-linenRev = "v3.0.0"
+linenRev = "037925bc5068c54efd86690b78b258b9c6787959"
 port = 8080
 
 [model]
