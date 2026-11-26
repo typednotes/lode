@@ -7,7 +7,7 @@
 # linen's FFI), read from linen's own list at LINEN_REF.
 #
 #   podman build -t lode .
-#   podman build --build-arg LINEN_REF=v3.0.0 -t lode .
+#   podman build --build-arg LINEN_REF=037925bc5068c54efd86690b78b258b9c6787959 -t lode .
 #
 # LINEN_REF is the linen version pre-built into the package cache and the
 # one new projects are told to require (LODE_LINEN_REV). A workspace whose
@@ -15,7 +15,7 @@
 # its linen from scratch (slow, but correct).
 
 FROM docker.io/library/ubuntu:24.04 AS base
-ARG LINEN_REF=v3.0.0
+ARG LINEN_REF=037925bc5068c54efd86690b78b258b9c6787959
 # linen's native build dependencies, from linen's own list at LINEN_REF
 # (`ci/native-deps/apt.txt`), plus what lode itself runs: tar, gzip, bash.
 ADD https://raw.githubusercontent.com/typednotes/linen/${LINEN_REF}/ci/native-deps/apt.txt /tmp/linen-apt.txt
