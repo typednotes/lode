@@ -942,12 +942,13 @@ defaultTargets = ["Demo"]
 [[require]]
 name = "linen"
 git = "https://github.com/typednotes/linen"
-rev = "v1.12.0"
+rev = "v3.0.0"
 
 [[lean_lib]]
 name = "Demo"
 ```
 
+Use `leanprover/lean4:v4.36.0` in `lean-toolchain` with Linen 3.0.0.
 Run `lake update` after changing requirements and commit the resulting
 manifest. Lode can do this when the appropriate tools are allowed. The first
 Linen build may take longer than the tiny no-dependency smoke test.

@@ -12,6 +12,7 @@
   | `GET /v0/sessions/{id}/messages?after=n&wait=s` | the log from entry `n` on; with `wait`, hold the request up to `s` seconds (≤ 60) until there is something new or the run ends |
   | `POST /v0/sessions/{id}/abort` | stop the running run (`202`), or `409` if none |
   | `PUT /v0/sessions/{id}/credentials` | `{"repo"?, "model"?, "lun"?}`: refresh warrants; `200` with the status |
+  | `PUT /v0/sessions/{id}/model-key` | `{"apiKey": "…"}` or `null` as the field value: set or clear the memory-only direct key |
   | `GET /v0/sessions/{id}/diff` | the unpublished changes (`text/plain`) |
 
   Errors are `{"error": message}`. When `LODE_TOKEN` is set every route but
@@ -136,6 +137,18 @@ private def messages (s : Session) (req : Network.WebApp.Request) : IO Network.W
     IO.sleep 250
   return json 200 (entriesJson (← s.entries.get) after (← s.running))
 
+private def modelKey (s : Session) (req : Network.WebApp.Request) : IO Network.WebApp.Response := do
+  let some caller := executionCaller s.cfg req | return error 401 "direct model keys require configured bearer authentication"
+  let .ok body ← readJson req | return error 400 "invalid direct model key body"
+  let .ok field := body.getObjVal? "apiKey" | return error 400 "supply apiKey as a string or null"
+  let key ← match field with
+    | .null => pure none
+    | .str key => pure (some key)
+    | _ => return error 400 "supply apiKey as a string or null"
+  match ← s.setDirectModelKey caller key with
+  | .error message => return error 400 message
+  | .ok () => return json 200 (Json.mkObj [("configured", toJson key.isSome)])
+
 /-- Route one request. -/
 def route (r : Registry) (req : Network.WebApp.Request) : IO Network.WebApp.Response := do
   let m := req.requestMethod
@@ -196,6 +209,8 @@ def route (r : Registry) (req : Network.WebApp.Request) : IO Network.WebApp.Resp
           match ← s.updateAccess c with
           | .error e => return error 400 e
           | .ok _ => return json 200 (← s.status)
+      | ["model-key"] =>
+        if is .PUT then modelKey s req else return error 404 "not found"
       | ["diff"] =>
         unless is .GET do return error 404 "not found"
         return text (← Workspace.diff s.wctx (checkoutDir s.cfg s.id) (← s.info.get).workspace)

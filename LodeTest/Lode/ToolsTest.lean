@@ -91,7 +91,7 @@ namespace LodeTests.Tools
 #guard (specsFor Lode.Prompt.plan.tools).all fun s => !["write", "edit", "bash", "publish", "lun_build"].contains s.name
 #guard (specsFor Lode.Prompt.build.tools).size == specs.size
 -- Every tool the agents name exists, and every spec is an object schema.
-#guard (Lode.Prompt.build.tools ++ Lode.Prompt.plan.tools).all fun n => specs.any (·.name == n)
+#guard (Lode.Prompt.build.tools ++ Lode.Prompt.plan.tools).all fun n => (Operation.parse n).isOk
 #guard specs.all fun s => s.schema.getObjValAs? String "type" == .ok "object"
 
 end LodeTests.Tools

@@ -15,16 +15,18 @@ git repository and writes the Lean projects `lun` builds and serves
 has no `cells`/`dags` aliases, and neither has lode). lode is the writer; lun is the runner — do not confuse
 the two. See `README.md` for the API and the design.
 
-Coordinated release set: **Lode 0.4.2 / Lun 0.3.0 / Typednotes 0.7.2 /
-Linen 1.10.0 / Liaison 0.6.0**. Package locks, image defaults and new-project
-defaults use this set. Publishing local release tags and deploying remain the
-user's actions.
+The development branch uses **Linen 3.0.0** in its package lock, image cache,
+and new-project defaults. The **Lode 0.4.2 / Lun 0.3.0 / Typednotes 0.7.2 /
+Linen 1.10.0 / Liaison 0.6.0** release set is documented in `README.md` and
+`docs/release-0.4.2.md`. Publishing local release tags and deploying remain
+the user's actions.
 
 | Task | Command |
 | --- | --- |
 | Install | Lean toolchain from `lean-toolchain` via [elan](https://github.com/leanprover/elan); `git`, `bash`, `jq` and linen's native build dependencies (see `Dockerfile`); `lake build` fetches the dependencies pinned in `lake-manifest.json` |
 | Type-check | `lake build --wfail` |
 | Test | `lake test`; `bash ci/test-require-main-ci.sh`; `test/e2e.sh`; `python3 test/cli.py`; `python3 test/python_client.py`; `python3 test/graph_svg.py`; `python3 test/lsp.py`; `test/liaison.sh`; `python3 test/native.py .lake/build/bin/lode`; `test/lun.sh ../lun ../linen` (see Running tests) |
+| Lint | `lake lint --builtin-only` (built-in checks) |
 | Build / release | `lake build lode`; `docker build -t lode .`; release: a `v*.*.*` tag push triggers `.github/workflows/docker-publish.yml` (push only when explicitly requested) |
 | CLI (applications) | `lake exe lode --help` |
 
@@ -193,7 +195,7 @@ experiments are logged too.
 ### Types: use the strongest standard checking the language offers, maximally
 
 - Use the standard type-checker of the language/framework in its strictest practical mode, run it in
-  CI, and keep it at zero errors. In this project: Lean 4 (toolchain `leanprover/lean4:v4.34.0`, pinned in `lean-toolchain`), type-checked by `lake build`, with every theorem checked by Lean's kernel. `autoImplicit` stays on (Lean's default: it only automates implicit binders, which are still fully checked), and CI builds with `--wfail` (`leanprover/lean-action@v1` `build-args`): warnings, including `declaration uses 'sorry'`, fail the build. Run `lake build --wfail` locally. "No `partial def`" remains a project convention (see Project-specific notes), not a compiler-enforced setting.
+  CI, and keep it at zero errors. In this project: Lean 4 (toolchain `leanprover/lean4:v4.36.0`, pinned in `lean-toolchain`), type-checked by `lake build`, with every theorem checked by Lean's kernel. `autoImplicit` stays on (Lean's default: it only automates implicit binders, which are still fully checked), and CI builds with `--wfail` (`leanprover/lean-action@v1` `build-args`): warnings, including `declaration uses 'sorry'`, fail the build. Run `lake build --wfail` locally. "No `partial def`" remains a project convention (see Project-specific notes), not a compiler-enforced setting.
 - Make illegal states unrepresentable: precise types, enums/sum types over strings and flags, new
   types for identifiers and units, immutable data by default. Avoid `Any`, casts and ignores; when
   one is unavoidable, scope it narrowly and justify it in a comment.
@@ -365,6 +367,9 @@ IO modules:
   abort flag, process group killed); `check` reads `lake build` with linen's
   `System.LakeLog`.
 - `Lode/Http.lean` — one request over linen's client.
+- `Lode/Settings.lean` — explicit operator TOML or JSON settings and environment precedence.
+- `Lode/Secrets.lean` — endpoint-bound model API key versions in Typednotes Secrets.
+- `Lode/Extension.lean`, `Lode/Mcp.lean` — compile-time tool catalog, typed decoders and bounded stdio MCP calls.
 - `Lode/Workspace.lean` — the checkout: `open` (public/local git clone, or
   brokered immutable branch/tree/file views materialized using private
   `NativeFile` witnesses), `changes` (`git diff --raw` against `localBase`),
@@ -387,6 +392,8 @@ IO modules:
 
 ```
 lake test          # unit tests
+python3 test/settings.py     # settings and direct key handoff via real local services
+lake exe lode-mcp-smoke      # compiled MCP extension subprocess
 test/e2e.sh                   # scripted model, file:// repository, real git/lake
 test/liaison.sh               # GitHub/GitLab/Anthropic through test/mock_liaison.py
 python3 test/native.py .lake/build/bin/lode # all native protocols, policy and restart

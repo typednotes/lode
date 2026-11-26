@@ -5,7 +5,7 @@ open System Lake DSL
 -- SHA-256) but none of its pkg-config libraries (no Postgres), so, like
 -- `lun`, it needs no extra link arguments.
 
-require linen from git "https://github.com/typednotes/linen" @ "fde31559683b7f6c04f877b4031ee782307b337a"
+require linen from git "https://github.com/typednotes/linen" @ "v3.0.0"
 
 -- For `Liaison.Wire` only: liaison's wire format (`POST /v0/egress`), the
 -- module liaison's own server parses with. It is pure and imports none of
@@ -17,7 +17,7 @@ require liaison from git "https://github.com/typednotes/liaison" @ "v0.6.0"
 require lun from git "https://github.com/typednotes/lun" @ "291ae06d8f947140654091442ed28a7acfb0d037"
 
 package lode where
-  version := v!"0.5.1"
+  version := v!"0.6.0"
   testDriver := "LodeTest"
 
 @[default_target]
@@ -25,8 +25,8 @@ lean_lib Lode where
 
 -- Named `LodeTest` (module tree `LodeTest.*`), the `{Package}Test` convention
 -- of mathlib, batteries and aesop, and the package's `testDriver` (`lake test`).
-lean_lib LodeTest where
-  precompileModules := true
+-- The `#guard` tests run in Lean's interpreter and need only their imports.
+lean_lib LodeTest
 
 @[default_target]
 lean_exe lode where
@@ -36,3 +36,7 @@ lean_exe lode where
 -- HTTP/TLS implementation as the writer. Never part of a release default target.
 lean_exe «lode-native-smoke» where
   root := `test.NativeBrokerSmoke
+
+-- Native MCP stdio fixture, kept out of release builds.
+lean_exe «lode-mcp-smoke» where
+  root := `test.McpSmoke

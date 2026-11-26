@@ -125,7 +125,7 @@ structure SessionSpec where
   model : Model.Config
   creds : CredentialSet
   message : Option String
-  tools : Tools.Policy := Tools.Policy.all
+  tools : Tools.Policy := Tools.Policy.default
   execution : Option Runtime.Context := none
   buildContracts : Lun.BuildContracts := {}
   background : Bool := false
@@ -218,7 +218,7 @@ def SessionSpec.parse (j : Json) (defaultModel : Option Model.Config) (allowLoca
   return {
     source := { repo, branch := r.source.branch, path }, agent, model
     creds := { repo := sourceCreds, model := modelCreds, lun := lunCreds }, message
-    tools := r.tools.getD Tools.Policy.all, execution, buildContracts := buildContracts.getD {}
+    tools := r.tools.getD Tools.Policy.default, execution, buildContracts := buildContracts.getD {}
     background := r.background.getD false, requestKey }
 
 /-- Persisted connection identity, without warrant tags or credential material. -/

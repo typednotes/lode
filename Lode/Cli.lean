@@ -6,6 +6,7 @@
   Sessions use the same persisted metadata, policy and log as the service.
 -/
 import Lode.Session
+import Lode.Settings
 
 namespace Lode.Cli
 
@@ -20,22 +21,74 @@ structure Options where
   path : Option String := none
   agent : Option String := none
   configFile : Option String := none
+  settingsFile : Option String := none
   resume : Option String := none
   deriving BEq, Repr
 
 /-- CLI usage; normal invocation without a subcommand still serves HTTP. -/
 def usage : String :=
   "Usage:\n" ++
-  "  lode [serve]                         Start the HTTP service\n" ++
+  "  lode [serve] [--settings FILE]        Start the HTTP service\n" ++
   "  lode run --repo PATH_OR_URL [--branch main] [--path DIR] [--agent build|plan]\n" ++
   "  lode run --config FILE               Launch from a session-request JSON file\n" ++
   "  lode run --resume ID                 Continue a persisted session\n\n" ++
+  "  lode secrets store-model-key [--settings FILE] [--yes | --dry-run]\n" ++
+  "      Store LODE_MODEL_API_KEY at the configured Secrets KV path.\n\n" ++
   "run reads one UTF-8 task from stdin through EOF (at most 1 MB).\n" ++
   "Assistant answers go to stdout; progress and tool results go to stderr.\n" ++
   "Exit codes: 0 finished, 1 run/setup failure, 2 invalid arguments/stdin.\n" ++
+  "serve and run accept --settings FILE (TOML or JSON), or LODE_SETTINGS.\n" ++
+  "Environment values override settings. --config still names a session request.\n" ++
   "run enables local mode. LODE_MODEL_* configure the default model.\n" ++
   "LODE_WORKDIR defaults to $HOME/.local/state/lode for run.\n" ++
   "Do not run concurrent processes against the same LODE_WORKDIR.\n"
+
+/-- Arguments for the operator's Secrets write. -/
+private inductive StoreMode where
+  | confirm | apply | preview
+
+private def storeOptions (args : List String) : Except String (Option String × StoreMode) :=
+  let rec parse (args : List String) (path : Option String) (mode : Option StoreMode) :
+      Except String (Option String × StoreMode) :=
+    match args with
+    | [] => .ok (path, mode.getD .confirm)
+    | "--settings" :: value :: rest => do
+      unless path.isNone && !value.isEmpty && !value.startsWith "--" do
+        throw "--settings needs one filename"
+      parse rest (some value) mode
+    | ["--settings"] => .error "--settings needs one filename"
+    | flag :: rest => do
+      unless mode.isNone do throw "choose one of --yes or --dry-run"
+      let mode ← match flag with
+        | "--yes" => pure StoreMode.apply
+        | "--dry-run" => pure StoreMode.preview
+        | _ => throw s!"unknown argument: {flag}"
+      parse rest path (some mode)
+  parse args none none
+
+/-- Write the operator's model key as a new Secrets KV version. A dry run
+    names the destination without accessing the vault. -/
+def storeModelKey (args : List String) : IO UInt32 := do
+  let (settingsPath, mode) ← match storeOptions args with
+    | .ok options => pure options
+    | .error error => IO.eprintln s!"lode: {error}\n{usage}"; return 2
+  let cfg ← Settings.runtime (← Settings.load settingsPath)
+  let some vault := cfg.modelKeySecret | throw (IO.userError "configure a Secrets model key destination")
+  IO.eprintln s!"Secrets destination {vault.baseUrl}/v1/secret/data/{vault.path} for {vault.modelBaseUrl}"
+  match mode with
+  | .preview => return 0
+  | .apply => pure ()
+  | .confirm =>
+    let stdin ← IO.getStdin
+    unless ← stdin.isTty do throw (IO.userError "pass --yes to write non-interactively")
+    let stderr ← IO.getStderr
+    stderr.putStr "Write a new Secrets KV version? Type yes to confirm. "
+    stderr.flush
+    unless (← stdin.getLine).trimAscii.toString == "yes" do return 1
+  let some key := cfg.modelApiKey | throw (IO.userError "set LODE_MODEL_API_KEY")
+  vault.store key
+  IO.eprintln "Stored a new Secrets KV version."
+  return 0
 
 /-- Interpret flags once; refuse duplicates and ambiguous launch modes. -/
 def Options.parse (args : List String) : Except String Options := do
@@ -52,6 +105,7 @@ def Options.parse (args : List String) : Except String Options := do
         | "--path" => pure { opts with path := ← set opts.path }
         | "--agent" => pure { opts with agent := ← set opts.agent }
         | "--config" => pure { opts with configFile := ← set opts.configFile }
+        | "--settings" => pure { opts with settingsFile := ← set opts.settingsFile }
         | "--resume" => pure { opts with resume := ← set opts.resume }
         | _ => throw s!"unknown argument: {flag}"
       go rest opts
