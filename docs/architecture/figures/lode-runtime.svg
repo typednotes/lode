@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 416" role="img" aria-labelledby="title desc">
+  <title id="title">Lode runtime and service boundaries</title>
+  <desc id="desc">HTTP and stdio clients enter the same Lean session engine. Model calls go directly or through Liaison. An operator can store direct keys in Secrets. The session uses local tools, Lean LSP and compiled extensions. Lun builds and runs published source.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#486075"/>
+    </marker>
+    <style>
+      .box { fill: #fff; stroke: #9eb1c3; stroke-width: 1.5; }
+      .engine { fill: #e5effd; stroke: #6285b2; stroke-width: 1.5; }
+      .title { font: 700 20px system-ui, sans-serif; fill: #1b3145; text-anchor: middle; }
+      .subtitle { font: 15px system-ui, sans-serif; fill: #384f62; text-anchor: middle; }
+      .edge { fill: none; stroke: #486075; stroke-width: 2; marker-end: url(#arrow); }
+    </style>
+  </defs>
+  <rect width="900" height="416" rx="18" fill="#f3f7fa"/>
+  <rect class="box" x="302" y="24" width="296" height="60" rx="10"/>
+  <text class="title" x="450" y="51">HTTP client or stdio CLI</text>
+  <text class="subtitle" x="450" y="72">Task, settings and session controls</text>
+  <path class="edge" d="M450 84 V124"/>
+  <rect class="engine" x="302" y="124" width="296" height="96" rx="10"/>
+  <text class="title" x="450" y="160">Lode session engine</text>
+  <text class="subtitle" x="450" y="184">Lean agent loop and launch policy</text>
+  <text class="subtitle" x="450" y="205">Git-backed workspace</text>
+  <path class="edge" d="M302 172 H251"/>
+  <rect class="box" x="24" y="124" width="226" height="96" rx="10"/>
+  <text class="title" x="137" y="160">Model APIs</text>
+  <text class="subtitle" x="137" y="185">Direct or through Liaison</text>
+  <path class="edge" d="M598 172 H650"/>
+  <rect class="box" x="650" y="124" width="226" height="96" rx="10"/>
+  <text class="title" x="763" y="160">Secrets</text>
+  <text class="subtitle" x="763" y="185">Endpoint-bound direct key</text>
+  <path class="edge" d="M450 220 V267 H222 V303"/>
+  <path class="edge" d="M450 267 H678 V303"/>
+  <rect class="box" x="44" y="303" width="356" height="85" rx="10"/>
+  <text class="title" x="222" y="338">Local tools and extensions</text>
+  <text class="subtitle" x="222" y="363">Files, shell, Lake, Lean LSP and MCP stdio</text>
+  <rect class="box" x="500" y="303" width="356" height="85" rx="10"/>
+  <text class="title" x="678" y="338">Lun</text>
+  <text class="subtitle" x="678" y="363">Build and run published Lean source</text>
+</svg>

@@ -77,6 +77,7 @@ def defaultBase? : String → Option String
   | "meta" => some "https://api.meta.ai/v1"
   | "xai" => some "https://api.x.ai/v1"
   | "scaleway" => some "https://api.scaleway.ai/v1"
+  | "baseten" => some "https://inference.baseten.co/v1"
   | "minimax" => some "https://api.minimax.io/anthropic/v1"
   | "minimax-cn" => some "https://api.minimaxi.com/anthropic/v1"
   | "kimi-coding" => some "https://api.kimi.com/coding/v1"
@@ -808,6 +809,9 @@ structure Failure where
 /-- One attempt: the request body is sent, the answer read. -/
 private def attempt (cfg : Config) (t : Transport) (body : Json) (context : Liaison.NativeContext) (timeoutMs : Nat) :
     IO (Except Failure Reply) := do
+  let redact (message : String) := match t with
+    | .direct key => if key.isEmpty then message else message.replace key "[redacted]"
+    | _ => message
   let path := match cfg.api with
     | .anthropic | .pi => "/messages"
     | .responses => "/responses"
@@ -837,25 +841,26 @@ private def attempt (cfg : Config) (t : Transport) (body : Json) (context : Liai
           (some body.compress) timeoutMs
         pure (.ok (Http.status a, Http.text a, Network.HTTP.Client.retryAfterMillis a))
       | .none => pure (.error { message := "no transport for this model", retry := false })
-    catch e => pure (.error { message := toString e, retry := !(toString e).startsWith "liaison refused" })
+    catch e => pure (.error { message := redact (toString e), retry := !(toString e).startsWith "liaison refused" })
   match answer with
   | .error f => return .error f
   | .ok (status, text, retryAfterMs) =>
     if status != 200 then
+      let text := redact text
       let snippet := if text.length > 1000 then (text.take 1000).toString ++ "…" else text
       return .error { message := s!"the model API answered {status}: {snippet}", retry := retryable status,
                       retryAfterMs }
     if cfg.api == .pi then
-      return (piReply text (some cfg)).mapError fun m => { message := m, retry := false }
+      return (piReply text (some cfg)).mapError fun m => { message := redact m, retry := false }
     match Json.parse text with
-    | .error e => return .error { message := s!"the model's answer is not JSON: {e}", retry := true }
+    | .error e => return .error { message := s!"the model's answer is not JSON: {redact e}", retry := true }
     | .ok j =>
       let r := match cfg.api with
         | .anthropic => anthropicReply j
         | .responses => responsesReply j
         | .gemini => geminiReply j
         | _ => openaiReply j
-      return r.mapError fun m => { message := m, retry := false }
+      return r.mapError fun m => { message := redact m, retry := false }
 
 /-- Sleep `ms` milliseconds in short slices, returning early (with `true`)
     once `abort` is set. -/

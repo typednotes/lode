@@ -13,3 +13,4 @@ import LodeTest.Lode.SpecTest
 import LodeTest.Lode.QuestionTest
 import LodeTest.Lode.MiscTest
 import LodeTest.Lode.CliTest
+import LodeTest.Lode.SettingsTest

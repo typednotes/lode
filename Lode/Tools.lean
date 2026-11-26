@@ -27,6 +27,7 @@ import Lode.ToolPolicy
 import Lode.Lsp
 import Lode.Question
 import Linen.System.LakeLog
+import Lode.Extension
 import Linen.Control.Monad.Effect.FileSystem
 
 namespace Lode.Tools
@@ -213,6 +214,7 @@ inductive Args where
   | lunBuild
   | lunCall (name : String) (input : RuntimeInput)
   | askUser (question : Lode.Question)
+  | extension (name : String) (arguments : Json)
 
 /-- The operation is derived from the arguments actually executed. -/
 def Args.operation : Args → Operation
@@ -221,6 +223,7 @@ def Args.operation : Args → Operation
   | .todo .. => .todo | .check .. => .check | .lsp .. => .lsp | .publish .. => .publish
   | .lunBuild => .lunBuild | .lunCall .. => .lunCall
   | .askUser .. => .askUser
+  | .extension .. => .extension
 
 /-- Execution consumes evidence for both the launch/session ceiling and the
     selected agent. A checked name cannot be swapped for unrelated arguments. -/
@@ -298,6 +301,11 @@ def Args.parse (name : String) (arguments : String) : Except String Args := do
     return .publish m
   | "lun_build" => return .lunBuild
   | "ask_user" => return .askUser (← Lode.Question.parse j)
+  | "extension" =>
+    let name ← j.getObjValAs? String "name"
+    let input ← j.getObjVal? "arguments"
+    check input.getObj?.isOk "extension.arguments must be an object"
+    return .extension name input
   | "lun_call" =>
     let a : LunCallArgs ← fromJson? j
     check (a.kind == "function" || a.kind == "graph") "lun_call.kind: 'function' or 'graph'"
@@ -397,8 +405,16 @@ def specs : Array Model.ToolSpec := #[
 def specsFor (names : List String) : Array Model.ToolSpec := specs.filter (names.contains ·.name)
 
 /-- Advertise the same intersection that execution consumes. -/
-def specsForPolicy (policy : Policy) (agent : List String) : Array Model.ToolSpec :=
-  specsFor (agent.filter policy.names.contains)
+def specsForPolicy (policy : Policy) (agent : List String) (catalog : Extension.Catalog := .empty) :
+    Array Model.ToolSpec := Id.run do
+  let names := agent.filter policy.names.contains
+  let builtin := specsFor names
+  if !names.contains "extension" || catalog.tools.isEmpty then return builtin
+  let tools := catalog.tools.map fun tool => s!"{tool.name}: {tool.description} Arguments {tool.schema.compress}"
+  return builtin.push {
+    name := "extension", description := "Call one compiled tool. " ++ " ".intercalate tools
+    schema := object [("name", Json.mkObj [("type", "string"), ("enum", toJson (catalog.tools.map (·.name)))]),
+      ("arguments", prop "object" "Arguments for the selected compiled tool")] ["name", "arguments"] }
 
 -- ── Execution ───────────────────────────────────────────────────────────────
 
@@ -418,6 +434,7 @@ structure Env where
   lunBuild : IO (String × Bool)
   lunCall : String → String → Json → IO String
   askUser : Lode.Question → IO Unit := fun _ => throw (IO.userError "user questions are unavailable")
+  extensions : Extension.Catalog := .empty
 
 /-- The project directory's absolute path. -/
 def Env.projectDir (env : Env) : FilePath :=
@@ -584,6 +601,8 @@ private def runUnchecked (env : Env) : Args → IO (String × Bool)
     env.askUser question
     return ("Question sent. Work is paused until the user answers.", false)
   | .check targets => check env targets
+  | .extension name arguments =>
+    env.extensions.dispatch { project := env.projectDir, abort := env.abort, timeoutMs := env.checkTimeoutMs } name arguments
   | .lsp request => Lode.Lsp.run env.root env.projectDir env.abort env.checkTimeoutMs request
   | .publish message => do
     try return (← env.publish message, false) catch e => return (s!"publish failed: {e}", true)

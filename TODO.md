@@ -1,5 +1,17 @@
 # TODO
 
+## Lode architecture follow-up
+
+- [ ] Wire browser SSO through a configured issuer or Typednotes and Liaison.
+  Bind pending callback state to the session and use existing credential refresh.
+- [ ] Extend MCP support to dynamic discovery, interleaved protocol messages,
+  Streamable HTTP and brokered authorization.
+- [ ] Agree on native cell packages with Lun and Typednotes. Check the artifact
+  manifest, trust roots, target ABI, signing format and storage before loading code.
+- [ ] Compare CLI and tool lifecycle behavior with Pi using scripted providers.
+
+See [the architecture](docs/architecture/lode.md) for the current contracts.
+
 Suggestions from the linen v1.6.1 dependency review (2026-09-28), done in
 lode 0.2.0 with linen 1.7.0 (and lun 0.2.2, liaison 0.5.5 in the same pass).
 What remains is noted per item.

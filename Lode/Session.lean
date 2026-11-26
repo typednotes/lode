@@ -37,6 +37,7 @@ import Lode.Prompt
 import Lode.Compaction
 import Lode.Lun
 import Lode.Workspace
+import Lode.Secrets
 
 namespace Lode
 
@@ -57,6 +58,8 @@ structure Config where
   /-- A key for `defaultModel`'s endpoint, used directly (development). Only
       ever sent to `defaultModel.baseUrl`. -/
   modelApiKey : Option String := none
+  /-- Managed direct key for the same endpoint as `defaultModel`. -/
+  modelKeySecret : Option Secrets.ModelKey := none
   /-- Local mode: `file://` repositories and the `scripted` model (tests). -/
   allowLocal : Bool := false
   /-- At most this many model calls per run. -/
@@ -67,8 +70,11 @@ structure Config where
   /-- Pre-built packages: `{cache}/linen/{rev}`. -/
   packageCache : Option FilePath := none
   /-- What new projects should require. -/
-  linenRev : String := "v1.12.0"
-  toolchain : String := "leanprover/lean4:v4.34.0"
+  linenRev : String := "v3.0.0"
+  /-- The Lean toolchain for new projects. -/
+  toolchain : String := "leanprover/lean4:v4.36.0"
+  /-- The tools included in this executable. The session policy still gates them. -/
+  extensions : Extension.Catalog := .empty
 
 -- ── Time ────────────────────────────────────────────────────────────────────
 
@@ -93,7 +99,7 @@ structure Meta where
   source : Workspace.Source
   agent : String
   model : Model.Config
-  tools : Tools.Policy := Tools.Policy.all
+  tools : Tools.Policy := Tools.Policy.default
   toolCeiling : Option Tools.Policy := none
   credentialBindings : CredentialBindings := {}
   executionCeiling : Option Runtime.Bounds := none
@@ -147,6 +153,8 @@ structure Session where
   metaLock : Std.Mutex Unit
   entries : IO.Ref (Array Entry)
   creds : IO.Ref CredentialSet
+  /-- A direct model key supplied by the authenticated client. -/
+  directModelKey : IO.Ref (Option String)
   control : Std.Mutex Control
   abort : IO.Ref Bool
   todos : IO.Ref (Array Tools.Todo)
@@ -192,7 +200,8 @@ private def make (cfg : Config) (m : Meta) (entries : Array Entry) : IO Session 
   let policy ← IO.ofExcept ((Tools.BoundedPolicy.initial ceiling |>.narrow m.tools).mapError IO.userError)
   return {
     cfg, id := m.id, info := ← IO.mkRef m, metaLock := ← Std.Mutex.new (), entries := ← IO.mkRef entries
-    creds := ← IO.mkRef {}, control := ← Std.Mutex.new {}, abort := ← IO.mkRef false
+    creds := ← IO.mkRef {}, directModelKey := ← IO.mkRef none
+    control := ← Std.Mutex.new {}, abort := ← IO.mkRef false
     todos := ← IO.mkRef m.todos, steps := ← IO.mkRef 0, toolCeiling := ceiling
     toolPolicy := ← Std.Mutex.new policy }
 
@@ -304,7 +313,22 @@ structure StatusView where
   backgroundCheckout : Bool := true
   requestKey : Option String := none
   question : Option PendingQuestion := none
+  modelKeyUrl : Option String := none
   deriving ToJson
+
+private def directKeyTarget (cfg : Config) (model : Model.Config) : Bool :=
+  cfg.token.isSome && model.api != .scripted &&
+    cfg.defaultModel.any (fun configured => configured.baseUrl == model.baseUrl && configured.api == model.api)
+
+/-- Accept an authenticated client's key for the operator-selected endpoint
+    and API. `none` clears the in-memory override. -/
+def Session.setDirectModelKey (s : Session) (_caller : Runtime.AuthenticatedCaller) (key : Option String) :
+    IO (Except String Unit) := do
+  unless directKeyTarget s.cfg (← s.info.get).model do
+    return .error "this session does not use the configured direct model endpoint and API"
+  unless key.all Secrets.validKey do return .error "invalid direct model API key"
+  s.directModelKey.set key
+  return .ok ()
 
 /-- The session's status. -/
 def Session.status (s : Session) : IO Json := do
@@ -322,6 +346,7 @@ def Session.status (s : Session) : IO Json := do
     todos := ← s.todos.get, usage := m.usage, entries := (← s.entries.get).size
     credentials := { repo := cr.repo.isSome, model := cr.model.isSome, lun := cr.lun.isSome, execution := cr.execution.isSome }
     error := m.error, requestKey := m.requestKey, question := m.question
+    modelKeyUrl := if directKeyTarget s.cfg m.model then some s!"/v0/sessions/{s.id}/model-key" else none
     checkout := match m.checkout.getD .ready with | .opening => "opening" | .ready => "ready" | .failed => "failed" } : StatusView)
 
 -- ── What a run needs ────────────────────────────────────────────────────────
@@ -335,11 +360,14 @@ def Session.transport (s : Session) : IO Model.Transport := do
     let some url := s.cfg.liaisonUrl
       | throw (IO.userError "the model has credentials, but LODE_LIAISON_URL is not set")
     return .liaison url c
-  match s.cfg.modelApiKey, s.cfg.defaultModel with
-  | some key, some d =>
-    if d.baseUrl == m.baseUrl then return .direct key
-    else throw (IO.userError "no model credentials for this model: send them with the message")
-  | _, _ => throw (IO.userError "no model credentials: send model credentials with the message")
+  if directKeyTarget s.cfg m then
+    if let some key ← s.directModelKey.get then return .direct key
+  if let some defaultModel := s.cfg.defaultModel then
+    if defaultModel.baseUrl == m.baseUrl then
+      if let some key := s.cfg.modelApiKey then return .direct key
+      if let some vault := s.cfg.modelKeySecret then
+        if vault.modelBaseUrl == m.baseUrl then return .direct (← vault.read)
+  throw (IO.userError "no model credentials for this endpoint: send model credentials with the message")
 
 /-- `git show {localBase}:{path}/lun.json`: the manifest as published. -/
 private def publishedManifest (s : Session) : IO String := do
@@ -359,7 +387,7 @@ def Session.toolEnv (s : Session) : IO Tools.Env := do
   let project := if m.source.path.isEmpty then [] else m.source.path.splitOn "/"
   let projectDir := project.foldl (fun (acc : FilePath) (c : String) => acc / c) root
   return {
-    root, project, abort := s.abort, checkTimeoutMs := s.cfg.checkTimeoutMs, todos := s.todos
+    root, project, abort := s.abort, checkTimeoutMs := s.cfg.checkTimeoutMs, todos := s.todos, extensions := s.cfg.extensions
     seed := Workspace.seedCache s.cfg.packageCache projectDir s.cfg.gitTimeoutMs
     askUser := fun question => do
       let id ← newId
@@ -490,10 +518,11 @@ def Session.loop (s : Session) (r : Run) : Nat → IO Outcome
     let es ← s.entries.get
     let m ← s.info.get
     let policy ← s.toolPolicy.atomically (m := IO) do return (← get).policy
+    let tools := Tools.specsForPolicy policy r.agent.tools s.cfg.extensions
     let system := r.system ++ "\n# Current writer tool policy\n\nAvailable tools: " ++
-      (", ".intercalate (r.agent.tools.filter policy.names.contains)) ++
+      (", ".intercalate (tools.toList.map (·.name))) ++
       ". Only these named tools may execute; removed tools stay unavailable after refresh or agent changes.\n"
-    let reply ← Model.complete m.model (← s.transport) system (Tools.specsForPolicy policy r.agent.tools)
+    let reply ← Model.complete m.model (← s.transport) system tools
       (context es) (assistantCount es) s.cfg.modelTimeoutMs s.abort s.id
     s.steps.modify (· + 1)
     s.append (.assistant reply m.model.name (← nowMs))
