@@ -36,8 +36,8 @@ Python examples and graph SVGs. Lode 0.5.0 was
 coordinated with **Lun 0.4.1 /
 Typednotes 0.11.0 / Linen 1.12.0 / Liaison 0.6.0 SDK**. It adds background checkout,
 immutable retry identities and bounded user questions. See [the release
-contract](docs/release-0.5.0.md). The development branch uses Linen 5.0.0
-with Lean 4.36.0 for Lode and new projects.
+contract](docs/release-0.5.0.md). Lode 0.6.2 builds with Linen 5.0.0 and uses it
+with Lean 4.36.0 for new projects.
 
 The earlier **0.4.3** implementation added immutable caller-pinned output/source/
 wiring contracts and explicit graph/parent checks through the existing Lean LSP
@@ -479,7 +479,7 @@ the image job checks out the verified SHA and uses `packages: write` to build
 and publish, without repeating the full CI suite on tags.
 
 The image carries the Lean toolchain and Linen
-(`LINEN_REF` defaults to the Linen 5.0.0 commit) pre-built in the package
+(`LINEN_REF` uses the pinned Linen 5.0.0 release commit) pre-built in the package
 cache, so a workspace locked to that revision does not rebuild linen.
 
 The Lode `0.4.2` release set used Lun `0.3.0`, Liaison `0.6.0` and

@@ -7,6 +7,7 @@
 # linen's FFI), read from linen's own list at LINEN_REF.
 #
 #   podman build -t lode .
+#   podman build --build-arg LINEN_REF=bcfec9a81d6e738ecb273f89e2102b4712d8e160 -t lode .
 #
 # LINEN_REF is the linen version pre-built into the package cache and the
 # one new projects are told to require (LODE_LINEN_REV). A workspace whose

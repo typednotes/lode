@@ -19,11 +19,17 @@ Releases before 0.5.1 are described in their git tags and in `docs/release-*.md`
 - `lode output` exports a published session as a Linen v2 cell by default,
   or as a Lake executable, an immutable Git reference, or a source archive.
 
+## [0.6.2] — 2026-11-27
+
 ### Changed
 
-- Build with [Linen 5.0.0](https://github.com/typednotes/linen/commit/bcfec9a81d6e738ecb273f89e2102b4712d8e160).
-- Use the Linen 4.1.0 release for the shared cell API, container cache,
-  new projects and Lun integration fixtures.
+- Build with [Linen 5.0.0](https://github.com/typednotes/linen/releases/tag/v5.0.0).
+
+## [0.6.1] — 2026-11-27
+
+### Changed
+
+- Build with Linen 4.0.0 at its [release commit](https://github.com/typednotes/linen/commit/037925bc5068c54efd86690b78b258b9c6787959).
 
 ## [0.6.0] — 2026-11-26
 
