@@ -230,6 +230,6 @@ With Linen 5.0.0 and the Lun revision pinned by CI, macOS can build the
 generated driver but fail to load it with `symbol not found in flat namespace
 '_lean_notify_assert'`. In a disposable Lun checkout, append
 `-Wl,-u,_lean_notify_assert` to the macOS driver link arguments in
-`Lun/Build.lean` to retain that symbol. If Lean's bundled linker rejects
+`Lun/Driver.lean` to retain that symbol. If Lean's bundled linker rejects
 `arm64e.x1` SDK stubs, set `SDKROOT` to an installed SDK it supports, such as
 `$(xcrun --sdk macosx26.5 --show-sdk-path)`.

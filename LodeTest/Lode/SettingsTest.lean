@@ -1,6 +1,7 @@
 import Lode.Settings
 import Lode.Mcp
 import Lode.Extensions.Lean
+import Lode.Cell
 
 open Lean Lode
 
@@ -31,3 +32,21 @@ private def modelBase := "https://api.example/v1"
 #guard (Extension.Catalog.check [Extensions.leanVersion, Extensions.leanVersion]).isOk == false
 #guard (Mcp.response 1 "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{}}").isOk == false
 #guard (Mcp.response 1 "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{},\"error\":{}}").isOk == false
+
+-- S7: redirect route and issuer transport are fixed by the operator configuration.
+#guard (OAuth.Config.check "https://issuer.example/authorize" "https://issuer.example/token"
+  "https://lode.example/v0/model-oauth/callback" "client" none none false).isOk
+#guard (OAuth.Config.check "https://issuer.example/authorize" "http://issuer.example/token"
+  "https://lode.example/v0/model-oauth/callback" "client" none none true).isOk == false
+#guard (OAuth.Config.check "https://issuer.example/authorize" "https://issuer.example/token"
+  "https://lode.example/other" "client" none none false).isOk == false
+
+-- S8: an SSE result needs a complete frame. A reverse request is refused.
+#guard (Mcp.sseResponse 2 "data: {\"jsonrpc\":\"2.0\",\"id\":2,\"result\":true}\n\n").toOption == some (.bool true)
+#guard (Mcp.sseResponse 2 "data: {\"jsonrpc\":\"2.0\",\"id\":2,\"result\":true}").isOk == false
+#guard (Mcp.sseResponse 2 "data: {\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"sampling/createMessage\"}\n\n").isOk == false
+
+-- S9: manifests use canonical lower-case digests.
+#guard (Cell.Digest.check (String.ofList (List.replicate 64 'a'))).isOk
+#guard (Cell.Digest.check (String.ofList (List.replicate 64 'A'))).isOk == false
+#guard (Cell.Manifest.parse "{}").isOk == false

@@ -21,7 +21,7 @@ jobs:
       - uses: typednotes/linen/.github/actions/setup-native-deps@bcfec9a81d6e738ecb273f89e2102b4712d8e160
         with:
           keyring: false
-      - run: sudo apt-get install -y jq
+      - run: sudo apt-get install -y jq gnupg
       - uses: leanprover/lean-action@v1
         with:
           test: false
@@ -39,8 +39,16 @@ jobs:
         run: python3 test/cli.py
       - name: Operator settings and direct model key handoff
         run: python3 test/settings.py
-      - name: Compiled MCP extension over stdio
-        run: lake exe lode-mcp-smoke
+      - name: Generate and run an addition cell
+        run: python3 Examples/cell-addition/test.py
+      - name: Export signed cells, executables, source packages and Git coordinates
+        run: python3 test/output.py
+      - name: Cell manifest and OpenPGP signing
+        run: python3 test/cell_artifact.py
+      - name: Compiled MCP extension over stdio and HTTP
+        run: |
+          lake exe lode-mcp-smoke
+          python3 test/mcp_http.py
       # The GitHub/GitLab and model paths, against a mock liaison.
       - run: test/liaison.sh
 

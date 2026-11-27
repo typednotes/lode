@@ -20,14 +20,10 @@ structure ModelKey where
 def validKey (key : String) : Bool :=
   !key.isEmpty && key.length ≤ 4096 && key.all (fun c => c.toNat > 0x20 && c.toNat < 0x7f)
 
-private def loopback (url : String) : Bool :=
-  ["http://localhost", "http://127.0.0.1", "http://[::1]"].any fun host =>
-    url == host || url.startsWith (host ++ ":") || url.startsWith (host ++ "/")
-
 /-- Validate a configured Secrets namespace. Plain HTTP is restricted to
     loopback in local mode. The path is relative to the KV data mount. -/
 def ModelKey.configure (url path modelBaseUrl token : String) (allowLocal : Bool) : Except String ModelKey := do
-  unless Validate.baseUrl url (allowLocal && loopback url) do
+  unless (Validate.credentialUrl url allowLocal).isSome do
     throw "secrets.baseUrl must be HTTPS, or loopback HTTP in local mode"
   unless !path.isEmpty && Validate.projectPath path do throw "secrets.modelKeyPath must contain plain relative components"
   unless validKey token do throw "LODE_SECRETS_TOKEN is not a valid bearer token"

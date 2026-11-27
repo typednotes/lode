@@ -6,6 +6,9 @@
 - [Local testing](local-testing.md)
 - [Operator settings, credentials and compiled extensions](architecture/lode.md)
 - [Repository README and API](../README.md)
+- [Generate and run an addition cell](../Examples/cell-addition/README.md)
+- [Build a Linen cell locally with Codex](local-cell-with-codex.md)
+- [Export a signed Linen cell](cell-output.md)
 - [Project contracts](../SPEC.md)
 
 ## System boundaries

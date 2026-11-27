@@ -26,6 +26,15 @@ structure SecretsFile where
   modelKeyPath : Option String := none
   deriving FromJson
 
+/-- The public registration of the model's OAuth client. -/
+structure OAuthFile where
+  authorizationUrl : String
+  tokenUrl : String
+  redirectUri : String
+  clientId : String
+  scope : Option String := none
+  deriving FromJson
+
 /-- Non-secret startup settings accepted in TOML and JSON. Timeouts are in seconds. -/
 structure File where
   port : Option Nat := none
@@ -44,6 +53,7 @@ structure File where
   toolchain : Option String := none
   model : Option ModelFile := none
   secrets : Option SecretsFile := none
+  modelOAuth : Option OAuthFile := none
   deriving FromJson
 
 private def fields (label : String) (allowed : List String) (json : Json) : Except String Unit := do
@@ -55,12 +65,14 @@ private def fields (label : String) (allowed : List String) (json : Json) : Exce
 def parse (json : Json) : Except String File := do
   fields "settings" ["port", "workdir", "allowLocal", "liaisonUrl", "lunUrl", "lunBuildTimeout",
     "lunCallTimeout", "maxSteps", "modelTimeout", "gitTimeout", "checkTimeout", "packageCache",
-    "linenRev", "toolchain", "model", "secrets"] json
+    "linenRev", "toolchain", "model", "secrets", "modelOAuth"] json
   if let .ok model := json.getObjVal? "model" then
     unless model == .null do
       fields "settings.model" ["provider", "api", "name", "baseUrl", "maxTokens", "contextWindow"] model
   if let .ok secrets := json.getObjVal? "secrets" then
     unless secrets == .null do fields "settings.secrets" ["baseUrl", "modelKeyPath"] secrets
+  if let .ok oauth := json.getObjVal? "modelOAuth" then
+    unless oauth == .null do fields "settings.modelOAuth" ["authorizationUrl", "tokenUrl", "redirectUri", "clientId", "scope"] oauth
   (fromJson? json).mapError (fun _ => "settings contain a value of the wrong type")
 
 private def tomlScalar : Lake.Toml.Value → Except String Json
@@ -169,12 +181,19 @@ def runtime (file : File) (cli : Bool := false) : IO Config := do
           buildTimeoutMs := ← seconds "LODE_LUN_BUILD_TIMEOUT" file.lunBuildTimeout 3600000
           callTimeoutMs := ← seconds "LODE_LUN_CALL_TIMEOUT" file.lunCallTimeout 120000 : Lun.Config })
   let defaultModel ← defaultModel allowLocal (file.model.getD {})
+  let token ← env? "LODE_TOKEN"
+  let modelOAuth ← file.modelOAuth.mapM fun oauth => do
+    unless token.isSome && defaultModel.any (fun model => OAuth.supports model.api &&
+        (Validate.credentialUrl model.baseUrl allowLocal).isSome) do
+      throw (IO.userError "modelOAuth requires LODE_TOKEN and a direct bearer-compatible model endpoint")
+    IO.ofExcept ((OAuth.Config.check oauth.authorizationUrl oauth.tokenUrl oauth.redirectUri oauth.clientId
+      (← env? "LODE_OAUTH_CLIENT_SECRET") oauth.scope allowLocal).mapError IO.userError)
   let modelApiKey ← env? "LODE_MODEL_API_KEY"
   unless modelApiKey.all Secrets.validKey do throw (IO.userError "LODE_MODEL_API_KEY is not a valid API key")
   let cfg : Config := { workdir := workdir }
   return { cfg with
     allowLocal, lun
-    token := ← env? "LODE_TOKEN"
+    token, modelOAuth
     liaisonUrl := ← text "LODE_LIAISON_URL" file.liaisonUrl
     defaultModel
     modelApiKey

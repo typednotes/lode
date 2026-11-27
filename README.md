@@ -14,7 +14,7 @@
   <a href="https://github.com/typednotes/lode/pkgs/container/lode"><img src="https://img.shields.io/badge/ghcr.io-typednotes%2Flode-blue?logo=docker" alt="Docker image"></a>
   <a href="https://github.com/typednotes/lode/tags"><img src="https://img.shields.io/github/v/tag/typednotes/lode?label=version&sort=semver" alt="Version"></a>
   <a href="https://lean-lang.org/"><img src="https://img.shields.io/badge/Lean-v4.36.0-blue" alt="Lean v4.36.0"></a>
-   <a href="https://github.com/typednotes/linen"><img src="https://img.shields.io/badge/built%20on-linen%20v5.0.0-c9b896" alt="Built on linen v5.0.0"></a>
+   <a href="https://github.com/typednotes/linen/commit/bcfec9a81d6e738ecb273f89e2102b4712d8e160"><img src="https://img.shields.io/badge/built%20on-linen%20v5.0.0-c9b896" alt="Built on Linen 5.0.0"></a>
    <a href="https://github.com/typednotes/liaison"><img src="https://img.shields.io/badge/speaks-liaison%20v0.6.0-0e6b6f" alt="Speaks liaison v0.6.0"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License: Apache 2.0"></a>
 </p>
@@ -147,9 +147,14 @@ lake test          # unit tests (#guard): every parser and pure rule
 test/e2e.sh                   # a real agent loop (scripted model) over a real repository
 python3 test/cli.py           # native stdin/stdout/stderr, local Git/Lake, resume and failures
 python3 test/settings.py      # TOML/JSON, Secrets, direct key handoff and compiled tool policy
+python3 Examples/cell-addition/test.py  # generate and run a Lean cell and consumer
+python3 test/output.py         # Git, source package, executable and signed Linen cell
+python3 test/cell_artifact.py   # native manifest digest and OpenPGP verification
 lake exe lode-mcp-smoke       # MCP stdio subprocess fixture
+python3 test/mcp_http.py       # MCP HTTP, discovery and finite SSE fixture
 python3 test/python_client.py # HTTP client wire shapes, cursors, questions, deadlines and errors
 python3 test/graph_svg.py     # graph SVG topology, outcomes, escaping and exports
+python3 test/pi_parity.py      # opt-in comparison with a locally installed Pi
 uv run Examples/guide/run.py --quiet # real Python → Lode → Git/Lean/LSP → Lun graph pipeline
 test/liaison.sh               # GitHub, GitLab and the model through a mock liaison
 python3 test/native.py .lake/build/bin/lode  # native APIs and writer policy, no paid model
@@ -236,6 +241,29 @@ invalid arguments or stdin. A recoverable tool error does not end a run.
 `.lake/build/bin/lode --help` shows usage. No arguments (or `serve`) starts
 the HTTP service as before. See [local testing](docs/local-testing.md) for
 copy-paste scripted CLI/curl tests and how to use your own repository.
+
+### Session output
+
+After a build session publishes its changes, export the recorded revision.
+Every format prints a JSON receipt with the repository, branch, commit, project,
+and local artifact path when applicable.
+
+| Format | Command |
+| --- | --- |
+| Linen cell (default) | `lode output ID --target TARGET --build-record build.json --key FINGERPRINT` |
+| Executable | `lode output ID --format executable --target TARGET` |
+| Source in Git | `lode output ID --format git` |
+| Source package | `lode output ID --format source-package` |
+
+File-producing formats default to `output/<format>/<session-id>`. Pass
+`--output NEW_DIR` to select a new directory. Executable output builds the
+named Lake executable from a fresh snapshot. Source packages contain the
+tracked project subtree as `source.tar.gz`. Git output reports the published
+commit, with publication handled by the session's existing `publish` tool.
+
+Cell output builds and signs a Linen v2 worker with a compiler build record.
+To copy an existing signed package after verification, use `--package DIR
+--admission admission.json`. [Compiler and admission records](docs/cell-output.md).
 
 ## Python client and scripted example
 
@@ -340,6 +368,8 @@ rebuild the project from the repository alone.
 | `POST /v0/sessions/{id}/abort` | `202`, or `409` if no run is going |
 | `PUT /v0/sessions/{id}/credentials` | `{"repo"?, "model"?, "lun"?}`: fresh warrants |
 | `PUT /v0/sessions/{id}/model-key` | `{"apiKey":"…"}` sets a memory-only direct key. `{"apiKey":null}` clears it. Requires configured bearer authentication and the operator's model endpoint and protocol. Eligible status responses include `modelKeyUrl` |
+| `POST /v0/sessions/{id}/model-oauth` | Eligible status responses include `modelOAuthUrl`. An authenticated request returns a one-time authorization URL for the configured issuer |
+| `GET /v0/model-oauth/callback` | Browser authorization callback. A valid state and PKCE exchange set `modelOAuthConnected` on the session |
 | `GET /v0/sessions/{id}/diff` | unpublished changes, `text/plain` |
 
 With `LODE_TOKEN` set, every route but `/_health` needs
@@ -415,14 +445,15 @@ the session request. See the [settings example](docs/architecture/lode.md#operat
 | `model.provider`, `model.api`, `model.name`, `model.baseUrl` | `LODE_MODEL_PROVIDER`, `LODE_MODEL_API`, `LODE_MODEL_NAME`, `LODE_MODEL_BASE_URL` | Matching provider and model defaults when configured |
 | `model.maxTokens`, `model.contextWindow` | `LODE_MODEL_MAX_TOKENS`, `LODE_MODEL_CONTEXT_WINDOW` | 8192 / 200000 (Anthropic) or 128000 (other protocols) |
 | `secrets.baseUrl`, `secrets.modelKeyPath` | `LODE_SECRETS_URL`, `LODE_SECRETS_MODEL_KEY_PATH` | — |
+| `modelOAuth` | — | Optional issuer registration. See [browser OAuth](docs/architecture/lode.md#browser-oauth) |
 | `maxSteps` | `LODE_MAX_STEPS` | 200 model calls per run |
 | `modelTimeout`, `gitTimeout`, `checkTimeout` | `LODE_MODEL_TIMEOUT`, `LODE_GIT_TIMEOUT`, `LODE_CHECK_TIMEOUT` | 600 / 600 / 1800 seconds |
 | `packageCache` | `LODE_PACKAGE_CACHE` | — |
-| `linenRev`, `toolchain` | `LODE_LINEN_REV`, `LODE_TOOLCHAIN` | Linen 5.0.0 release commit / `leanprover/lean4:v4.36.0` for new projects |
+| `linenRev`, `toolchain` | `LODE_LINEN_REV`, `LODE_TOOLCHAIN` | `bcfec9a81d6e738ecb273f89e2102b4712d8e160` / `leanprover/lean4:v4.36.0` for new projects |
 | `allowLocal` | `LODE_ALLOW_LOCAL` (`1` or `0`) | HTTP off, native stdio on |
 
-Supply `LODE_TOKEN`, `LODE_LUN_TOKEN`, `LODE_MODEL_API_KEY`, and
-`LODE_SECRETS_TOKEN` through the process environment. Use `LODE_TOKEN` to
+Supply `LODE_TOKEN`, `LODE_LUN_TOKEN`, `LODE_MODEL_API_KEY`,
+`LODE_SECRETS_TOKEN`, and `LODE_OAUTH_CLIENT_SECRET` through the process environment. Use `LODE_TOKEN` to
 enable API bearer authentication. Refer to [Secrets and key rotation](docs/architecture/lode.md#models-and-credentials)
 for the managed key and direct handoff options.
 

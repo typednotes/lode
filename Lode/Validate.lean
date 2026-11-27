@@ -11,6 +11,7 @@
 -/
 import Linen.System.GitFn.Descriptor
 import Linen.System.Git.Remote
+import Linen.Network.URI
 
 namespace Lode.Validate
 
@@ -95,5 +96,15 @@ def baseUrl (s : String) (allowLocal : Bool := false) : Bool :=
     s.length ≤ 1024 && !rest.isEmpty && !s.endsWith "/" &&
       !rest.any (fun (c : Char) => c == '@' || c == '?' || c == '#' || c == ' ' || c.toNat < 0x21) &&
       !(rest.splitOn "/").any (fun seg => seg == "." || seg == "..")
+
+/-- An operator endpoint for transmitting credentials. Require HTTPS except
+    for loopback HTTP in explicit local mode. -/
+def credentialUrl (s : String) (allowLocal : Bool) : Option Network.URI.URI := do
+  let uri ← Network.URI.parseURI s
+  let authority ← uri.uriAuthority
+  let loopback := ["localhost", "127.0.0.1", "[::1]"].contains authority.uriRegName
+  let validPort := authority.uriPort.isEmpty ||
+    ((authority.uriPort.drop 1).toString.toNat?).any (fun port => port > 0 && port ≤ 65535)
+  if authority.uriRegName.isEmpty || !validPort || !baseUrl s (allowLocal && loopback) then none else some uri
 
 end Lode.Validate

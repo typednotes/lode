@@ -53,8 +53,9 @@ project continues to compile with its own `lean-toolchain` and package lock.
 | `baseten` | Chat Completions | `https://inference.baseten.co/v1` |
 
 The operator can set `model.api` and `model.baseUrl` for a compatible
-deployment. For direct inference, Lode selects the session override, a
-startup API key, or the current record at the configured Secrets KV path.
+deployment. For direct inference, Lode selects the manual session key,
+the session's OAuth bearer, a startup API key, or the current record at
+the configured Secrets KV path.
 Vault requests use `LODE_SECRETS_TOKEN` and verify the record's model base
 URL before using its key. To create a version in the vault, pass
 `LODE_MODEL_API_KEY` in the environment and run
@@ -73,11 +74,39 @@ warrant takes precedence. The app can replace short-lived warrants through
 OAuth credentials while servicing an operation. [`Lode/Server.lean`](../../Lode/Server.lean),
 [Liaison credential formats](https://github.com/typednotes/liaison#credential-formats).
 
-Browser SSO would add an operator-configured authorization URL and a
-short-lived callback bound to the originating session and issuer. The
-callback should redeem a code with PKCE when using OAuth, and resume the
-pending session through authenticated credential ingress. Provider-specific
-SSO protocols and a browser launcher are open work. [OAuth security BCP](https://www.rfc-editor.org/rfc/rfc9700.html).
+### Browser OAuth
+
+Configure a single issuer whose access token is accepted by the configured
+Chat Completions or Responses endpoint. Register the exact redirect URI at
+the issuer and route it to Lode's HTTP server.
+
+```toml
+[modelOAuth]
+authorizationUrl = "https://identity.example.org/oauth/authorize"
+tokenUrl = "https://identity.example.org/oauth/token"
+redirectUri = "https://lode.example.org/v0/model-oauth/callback"
+clientId = "lode"
+scope = "inference offline_access"
+```
+
+Supply `LODE_TOKEN` to protect the API and `LODE_OAUTH_CLIENT_SECRET` when
+the issuer uses a confidential client with form-based token authentication.
+For local testing, use a loopback redirect and `allowLocal = true`. Map a
+container port to loopback when the client and callback run on the same
+machine.
+
+A caller sends an authenticated `POST` to the session's `modelOAuthUrl`
+and opens the returned `authorizationUrl` in the browser. From a terminal,
+`lode oauth BASE_URL ID` prints this URL and `--open` opens it locally.
+The launcher uses `LODE_TOKEN` to authorize the request. Lode consumes
+the callback state once and exchanges the code with the PKCE S256 verifier.
+Poll the session's `modelOAuthConnected` field, then send the task. Lode
+refreshes the access token near expiry and replaces a rotated refresh token
+in memory. Browser OAuth does not affect session identity or permissions.
+Typednotes integration and live provider SSO qualification remain open.
+[`Lode/OAuth.lean`](../../Lode/OAuth.lean),
+[PKCE](https://www.rfc-editor.org/rfc/rfc7636.html),
+[OAuth security BCP](https://www.rfc-editor.org/rfc/rfc9700.html).
 
 ## Compiled tools and MCP
 
@@ -91,15 +120,18 @@ The live policy can remove access just like a built-in tool.
 [`Main.lean`](../../Main.lean), [`Lode/Extension.lean`](../../Lode/Extension.lean),
 [`Lode/Extensions/Lean.lean`](../../Lode/Extensions/Lean.lean).
 
-`Lode.Mcp.stdioTool` adapts one tool from an operator-selected MCP executable.
-The definition fixes the command, process arguments and server-side tool
-name, and supplies a decoder for the model arguments. Start with servers
-that send one JSON-RPC response per request. MCP discovery, interleaved
-server requests and notifications, and Streamable HTTP are future protocol
-work. Direct models and the scripted fixture can use compiled tools. Liaison
-also needs to authorize the `extension` tool before a brokered model can use
-it. [`Lode/Mcp.lean`](../../Lode/Mcp.lean), [`test/McpSmoke.lean`](../../test/McpSmoke.lean),
-[MCP lifecycle](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle).
+`Lode.Mcp.stdioTool` fixes the command, process arguments and server-side
+tool name for a subprocess that sends one response per request.
+`Lode.Mcp.httpTool` fixes an HTTP endpoint, optional bearer and tool name.
+It discovers up to eight pages of tools before calling the selected name,
+accepts JSON and finite SSE responses, and closes a negotiated session on
+exit. In finite SSE replies Lode skips notifications and rejects reverse
+requests. `Lode.Mcp.listHttpTools` exposes discovery to trusted compiled
+code. Registration and argument validation remain in the compiled catalog.
+Persistent SSE, resume and brokered MCP are tracked in TODO.
+[`Lode/Mcp.lean`](../../Lode/Mcp.lean), [`test/McpSmoke.lean`](../../test/McpSmoke.lean),
+[MCP lifecycle](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle),
+[MCP transports](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports).
 
 ## Cell sources and native packages
 
@@ -115,21 +147,56 @@ input and output types. An input-indexed output needs a wire adapter that
 decodes and retains the input witness. [Typednotes cell package design](https://github.com/typednotes/typednotes/blob/main/docs/cell-packages.md),
 [the five layers](https://github.com/typednotes/typednotes/blob/main/docs/diagrams/cell-package-layers.svg).
 
-Reusable native packages still need a shared contract with Lun. A proposed
-variant binds the Git commit and Lean declaration to the artifact digest,
-target platform and runtime ABI. A tarball could be stored under its digest
-in S3-compatible storage or served as a static file. A detached OpenPGP
-signature from the compiler's signing key would authenticate the manifest
-that binds those fields. For artifact bytes $B$, the manifest records
-$d=\operatorname{SHA256}(B)$ and verifies that digest before code is loaded.
-Invocation still requires the runner's live authorization.
+### Local native artifact manifests
+
+The operator can create and verify a manifest for an existing native payload.
+The identity JSON supplies `intentSha256`, `constraintsSha256`,
+`contractSha256`, `source` (`repository`, `commit`, optional `project`,
+`module`, `declaration`), `leanToolchain`, `target` and `runtimeAbi`. For payload bytes
+$B$, Lode records $d=\operatorname{SHA256}(B)$ and the byte count. OpenPGP
+signs the exact manifest bytes. Use a provisioned GnuPG keyring for the
+private key and an explicit verification keyring for accepted signers.
+
+```sh
+lode cell manifest identity.json cell.payload > manifest.json
+lode cell sign manifest.json cell.payload --key "$SIGNING_FINGERPRINT" > manifest.asc
+lode cell verify manifest.json cell.payload --signature manifest.asc --keyring compiler.gpg
+tar -czf cell.tgz manifest.json manifest.asc cell.payload
+```
+
+The signed identity is a producer declaration. Lun still needs to attest
+the checked source and compiled payload, verify the signature and ABI at
+admission, and enforce fresh authority for each run. The shared transport
+archive and content-addressed storage contract are open work.
+The addition example builds a native static library from a published Git
+commit, verifies its manifest and runs a separate consumer. [`Lode/Cell.lean`](../../Lode/Cell.lean),
+[addition example](../../Examples/cell-addition/README.md),
+[GnuPG signature verification](https://www.gnupg.org/documentation/manuals/gnupg/gpgv.html).
+
+### Shared cell package and invocation
+
+Linen's `System.Cell` defines the v2 manifest, verified package and typed call
+interface. `lode output` defaults to that package. The operator can build a
+published Lake target and sign it with a compiler record, or supply a package
+with an independently trusted manifest pin, runtime profile and compiler
+keyring. Lode binds the package to the session's published repository, commit
+and project before writing the result.
+
+The same session export can build a Lake executable from the published
+project snapshot, archive the tracked project files, or report the immutable
+Git coordinates. Work in the checkout must be published first. Cell signing
+is an explicit compiler step. A configured compiler can package its checked
+worker now, and direct integration with Lun's compiler is tracked in TODO.
+[Cell output and build records](../cell-output.md).
 
 ## Verification
 
 Use `lake build --wfail` and `lake test` for contracts in Lean. Run
 `python3 test/settings.py` to exercise a real service, a temp Git repository,
-Secrets rotation, both startup formats, and direct key handoff. Run
-`lake exe lode-mcp-smoke` for the stdio MCP exchange. The existing CLI, LSP,
+Secrets rotation, both startup formats, browser OAuth, and direct key handoff.
+Run `lake exe lode-mcp-smoke` and `python3 test/mcp_http.py` for MCP, and
+`python3 test/cell_artifact.py` for manifest and OpenPGP checks. The existing CLI, LSP,
 mock Liaison and Lun integration suites cover the remaining current paths.
-Comparative runs against Pi and live provider/SSO conformance are separate
-verification work. [Test commands](../../README.md#test).
+`python3 test/pi_parity.py` compares tool execution, result replay and
+session resume with Pi against a shared scripted localhost provider. Live
+provider SSO conformance remains open. [Test commands](../../README.md#test).

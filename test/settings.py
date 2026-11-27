@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 """Real Lode with local Secrets, model and repository fixtures. See SPEC.md."""
 
+import base64
 from contextlib import contextmanager
+import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
 import socket
 import subprocess
+import sys
 import tempfile
 import threading
 import time
 from urllib.error import HTTPError, URLError
+from urllib.parse import parse_qs, urlencode, urlsplit
 from urllib.request import Request, urlopen
 
 
@@ -27,12 +31,18 @@ def request(base, path, method="GET", body=None, authenticated=True):
         headers["Content-Type"] = "application/json"
     req = Request(base + path, json.dumps(body).encode() if body is not None else None,
                   headers, method=method)
+    def decode(response):
+        data = response.read()
+        if not data:
+            return None
+        if response.headers.get_content_type() == "application/json":
+            return json.loads(data)
+        return data.decode()
     try:
         with urlopen(req, timeout=5) as response:
-            data = response.read()
-            return response.status, json.loads(data) if data else None
+            return response.status, decode(response)
     except HTTPError as error:
-        return error.code, json.load(error)
+        return error.code, decode(error)
 
 
 def until(read, done):
@@ -70,6 +80,8 @@ def main():
     record = None
     vault_calls = []
     inference = []
+    browser_challenge = None
+    exchanges = []
 
     class Fixture(BaseHTTPRequestHandler):
         def reply(self, code, body=None):
@@ -88,8 +100,27 @@ def main():
 
         def do_POST(self):
             nonlocal record
-            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            payload = self.rfile.read(int(self.headers["Content-Length"]))
             auth = self.headers.get("Authorization")
+            if self.path == "/token":
+                fields = parse_qs(payload.decode())
+                exchanges.append(fields)
+                assert fields["client_id"] == ["lode-fixture"]
+                assert fields["client_secret"] == ["fixture-client-secret"]
+                assert auth is None
+                if fields["grant_type"] == ["authorization_code"]:
+                    assert fields["code"] == ["ab+012"]
+                    digest = hashlib.sha256(fields["code_verifier"][0].encode()).digest()
+                    assert base64.urlsafe_b64encode(digest).decode().rstrip("=") == browser_challenge
+                    self.reply(200, {"access_token": "fixture-oauth-access", "refresh_token": "fixture-oauth-refresh",
+                                     "expires_in": 2, "token_type": "Bearer"})
+                else:
+                    assert fields["grant_type"] == ["refresh_token"]
+                    assert fields["refresh_token"] == ["fixture-oauth-refresh"]
+                    self.reply(200, {"access_token": "fixture-oauth-rotated", "refresh_token": "fixture-oauth-next",
+                                     "expires_in": 3600, "token_type": "Bearer"})
+                return
+            body = json.loads(payload)
             if self.path == VAULT_PATH:
                 vault_calls.append(("POST", self.path, auth))
                 if auth != f"Bearer {VAULT_TOKEN}":
@@ -144,9 +175,9 @@ baseUrl = "{upstream}"
 modelKeyPath = "lode/test-model"
 ''')
             settings = work / "settings.json"
-            settings.write_text(json.dumps({"port": 1, "workdir": str(state), "allowLocal": True,
+            settings_content = {"port": 1, "workdir": str(state), "allowLocal": True,
                 "model": {"provider": "baseten", "name": "http-fixture", "baseUrl": model_base},
-                "secrets": {"baseUrl": upstream, "modelKeyPath": "lode/test-model"}}))
+                "secrets": {"baseUrl": upstream, "modelKeyPath": "lode/test-model"}}
             env = {key: value for key, value in os.environ.items() if not key.startswith("LODE_")}
             env.update(LODE_SETTINGS=str(toml), LODE_TOKEN=SERVER_TOKEN, LODE_SECRETS_TOKEN=VAULT_TOKEN)
 
@@ -178,6 +209,12 @@ modelKeyPath = "lode/test-model"
                 port = listener.getsockname()[1]
             env.update(LODE_PORT=str(port), LODE_SETTINGS=str(work / "invalid-fallback.toml"))
             base = f"http://127.0.0.1:{port}"
+            callback = "/v0/model-oauth/callback"
+            settings_content["modelOAuth"] = {"authorizationUrl": upstream + "/authorize",
+                "tokenUrl": upstream + "/token", "redirectUri": base + callback,
+                "clientId": "lode-fixture", "scope": "inference offline_access"}
+            settings.write_text(json.dumps(settings_content))
+            env["LODE_OAUTH_CLIENT_SECRET"] = "fixture-client-secret"
             with serve(settings, env, base):
                 # S1: --settings selects JSON over LODE_SETTINGS and the environment selects the port.
                 spec = {"source": {"url": repo.as_uri(), "branch": "main"}}
@@ -204,10 +241,51 @@ modelKeyPath = "lode/test-model"
                 record["apiKey"] = "fixture-vault-rotation"
                 assert send()["entries"][-1]["kind"] == "run_finished"
                 assert inference[-1][0] == "Bearer fixture-vault-rotation"
+                # S7: browser authorization binds state and verifier, then refreshes the session grant.
+                start = session["modelOAuthUrl"]
+                assert request(base, start, "POST", authenticated=False)[0] == 401
+                status, first = request(base, start, "POST")
+                assert status == 200
+                stale = parse_qs(urlsplit(first["authorizationUrl"]).query)["state"][0]
+                opener_dir = work / "browser-bin"
+                opener_dir.mkdir()
+                opener = opener_dir / ("open" if sys.platform == "darwin" else "xdg-open")
+                opener.write_text('#!/bin/sh\n[ -z "$LODE_TOKEN" ] || exit 3\nprintf "%s\\n" "$1" > "$BROWSER_FIXTURE"\n')
+                opener.chmod(0o700)
+                browser_record = opener_dir / "url"
+                opened = subprocess.run(
+                    [BINARY, "oauth", base, session["id"], "--open"],
+                    env=dict(env, PATH=f"{opener_dir}{os.pathsep}{env['PATH']}",
+                             BROWSER_FIXTURE=str(browser_record)), capture_output=True, text=True, timeout=15,
+                )
+                assert opened.returncode == 0, opened.stderr
+                assert browser_record.read_text() == opened.stdout
+                authorize_url = urlsplit(opened.stdout.strip())
+                authorize = parse_qs(authorize_url.query)
+                assert authorize_url.path == "/authorize"
+                assert authorize["scope"] == ["inference offline_access"]
+                assert authorize["redirect_uri"] == [base + callback]
+                assert authorize["code_challenge_method"] == ["S256"]
+                browser_challenge = authorize["code_challenge"][0]
+                assert request(base, callback + "?" + urlencode({"state": stale, "code": "ab+012"}),
+                               authenticated=False)[0] == 400
+                valid = callback + "?" + urlencode({"state": authorize["state"][0], "code": "ab+012"})
+                assert request(base, valid + "&%73tate=" + authorize["state"][0], authenticated=False)[0] == 400
+                with urlopen(base + valid, timeout=5) as browser:
+                    assert browser.status == 200 and browser.headers["Cache-Control"] == "no-store"
+                assert request(base, valid, authenticated=False)[0] == 400
+                assert request(base, endpoint)[1]["modelOAuthConnected"]
+                assert send()["entries"][-1]["kind"] == "run_finished"
+                assert inference[-1][0] == "Bearer fixture-oauth-access"
+                time.sleep(2)
+                assert send()["entries"][-1]["kind"] == "run_finished"
+                assert inference[-1][0] == "Bearer fixture-oauth-rotated"
+                assert [form["grant_type"] for form in exchanges] == [["authorization_code"], ["refresh_token"]]
                 # S3/S4: a mismatched base cannot disclose either key.
                 wrong = spec | {"model": {"baseUrl": upstream + "/other"}}
                 status, other = request(base, "/v0/sessions", "POST", wrong)
                 assert status == 201 and other["modelKeyUrl"] is None
+                assert other["modelOAuthUrl"] is None
                 assert request(base, f"/v0/sessions/{other['id']}/model-key", "PUT", {"apiKey": "blocked"})[0] == 400
                 assert request(base, key_url, "PUT", {"apiKey": "fixture-restart-key"})[0] == 200
 
@@ -228,13 +306,15 @@ modelKeyPath = "lode/test-model"
 
             for file in (state / "sessions" / captured).glob("*.json*"):
                 assert not any(key in file.read_text() for key in ("fixture-client-key", "fixture-declined-key",
-                    "fixture-restart-key", "fixture-vault-rotation", VAULT_TOKEN))
+                    "fixture-restart-key", "fixture-vault-rotation", "fixture-oauth-access",
+                    "fixture-oauth-refresh", "fixture-oauth-rotated", "fixture-client-secret", VAULT_TOKEN))
             with serve(settings, env, base):
+                assert not request(base, endpoint)[1]["modelOAuthConnected"]
                 assert request(base, endpoint + "/messages", "POST", {"text": "After restart."})[0] == 202
                 until(lambda: request(base, endpoint + "/messages")[1], lambda result: not result["running"])
                 assert inference[-1][0] == "Bearer fixture-vault-rotation"
             assert all(path == VAULT_PATH and auth == f"Bearer {VAULT_TOKEN}" for _, path, auth in vault_calls)
-            print("PASS: settings precedence, model presets, Secrets rotation, key handoff and compiled tool policy")
+            print("PASS: settings, Secrets, key handoff, browser OAuth with refresh, and compiled tool policy")
         finally:
             fixture.shutdown()
             worker.join()
