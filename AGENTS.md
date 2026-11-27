@@ -15,7 +15,7 @@ git repository and writes the Lean projects `lun` builds and serves
 has no `cells`/`dags` aliases, and neither has lode). lode is the writer; lun is the runner — do not confuse
 the two. See `README.md` for the API and the design.
 
-The development branch uses **Linen 4.0.0** in its package lock, image cache,
+The development branch uses **Linen 5.0.0** in its package lock, image cache,
 and new-project defaults. The **Lode 0.4.2 / Lun 0.3.0 / Typednotes 0.7.2 /
 Linen 1.10.0 / Liaison 0.6.0** release set is documented in `README.md` and
 `docs/release-0.4.2.md`. Publishing local release tags and deploying remain

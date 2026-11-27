@@ -14,7 +14,7 @@
   <a href="https://github.com/typednotes/lode/pkgs/container/lode"><img src="https://img.shields.io/badge/ghcr.io-typednotes%2Flode-blue?logo=docker" alt="Docker image"></a>
   <a href="https://github.com/typednotes/lode/tags"><img src="https://img.shields.io/github/v/tag/typednotes/lode?label=version&sort=semver" alt="Version"></a>
   <a href="https://lean-lang.org/"><img src="https://img.shields.io/badge/Lean-v4.36.0-blue" alt="Lean v4.36.0"></a>
-   <a href="https://github.com/typednotes/linen"><img src="https://img.shields.io/badge/built%20on-linen%20v4.0.0-c9b896" alt="Built on linen v4.0.0"></a>
+   <a href="https://github.com/typednotes/linen"><img src="https://img.shields.io/badge/built%20on-linen%20v5.0.0-c9b896" alt="Built on linen v5.0.0"></a>
    <a href="https://github.com/typednotes/liaison"><img src="https://img.shields.io/badge/speaks-liaison%20v0.6.0-0e6b6f" alt="Speaks liaison v0.6.0"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License: Apache 2.0"></a>
 </p>
@@ -36,7 +36,7 @@ Python examples and graph SVGs. Lode 0.5.0 was
 coordinated with **Lun 0.4.1 /
 Typednotes 0.11.0 / Linen 1.12.0 / Liaison 0.6.0 SDK**. It adds background checkout,
 immutable retry identities and bounded user questions. See [the release
-contract](docs/release-0.5.0.md). Lode 0.6.1 builds with Linen 4.0.0 and uses it
+contract](docs/release-0.5.0.md). Lode 0.6.2 builds with Linen 5.0.0 and uses it
 with Lean 4.36.0 for new projects.
 
 The earlier **0.4.3** implementation added immutable caller-pinned output/source/
@@ -418,7 +418,7 @@ the session request. See the [settings example](docs/architecture/lode.md#operat
 | `maxSteps` | `LODE_MAX_STEPS` | 200 model calls per run |
 | `modelTimeout`, `gitTimeout`, `checkTimeout` | `LODE_MODEL_TIMEOUT`, `LODE_GIT_TIMEOUT`, `LODE_CHECK_TIMEOUT` | 600 / 600 / 1800 seconds |
 | `packageCache` | `LODE_PACKAGE_CACHE` | — |
-| `linenRev`, `toolchain` | `LODE_LINEN_REV`, `LODE_TOOLCHAIN` | Linen 4.0.0 release commit / `leanprover/lean4:v4.36.0` for new projects |
+| `linenRev`, `toolchain` | `LODE_LINEN_REV`, `LODE_TOOLCHAIN` | Linen 5.0.0 release commit / `leanprover/lean4:v4.36.0` for new projects |
 | `allowLocal` | `LODE_ALLOW_LOCAL` (`1` or `0`) | HTTP off, native stdio on |
 
 Supply `LODE_TOKEN`, `LODE_LUN_TOKEN`, `LODE_MODEL_API_KEY`, and
@@ -448,7 +448,7 @@ the image job checks out the verified SHA and uses `packages: write` to build
 and publish, without repeating the full CI suite on tags.
 
 The image carries the Lean toolchain and Linen
-(`LINEN_REF` uses the pinned Linen 4.0.0 release commit) pre-built in the package
+(`LINEN_REF` uses the pinned Linen 5.0.0 release commit) pre-built in the package
 cache, so a workspace locked to that revision does not rebuild linen.
 
 The Lode `0.4.2` release set used Lun `0.3.0`, Liaison `0.6.0` and
