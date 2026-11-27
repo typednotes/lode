@@ -7,6 +7,24 @@ Releases before 0.5.1 are described in their git tags and in `docs/release-*.md`
 
 ## [Unreleased]
 
+### Added
+
+- Browser OAuth with PKCE and refresh for an operator-configured, bearer-compatible
+  direct model endpoint, with a terminal launcher.
+- MCP Streamable HTTP for bounded JSON and finite SSE replies, with paginated
+  tool discovery and explicitly compiled callable tool names.
+- Native cell manifest creation, local digest verification and detached OpenPGP signing.
+- An executable addition-cell example that generates, publishes, compiles and
+  runs an independent Lean consumer.
+- `lode output` exports a published session as a Linen v2 cell by default,
+  or as a Lake executable, an immutable Git reference, or a source archive.
+
+### Changed
+
+- Build with [Linen 5.0.0](https://github.com/typednotes/linen/commit/bcfec9a81d6e738ecb273f89e2102b4712d8e160).
+- Use the Linen 4.1.0 release for the shared cell API, container cache,
+  new projects and Lun integration fixtures.
+
 ## [0.6.0] — 2026-11-26
 
 ### Added

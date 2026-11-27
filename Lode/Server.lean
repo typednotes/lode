@@ -149,11 +149,41 @@ private def modelKey (s : Session) (req : Network.WebApp.Request) : IO Network.W
   | .error message => return error 400 message
   | .ok () => return json 200 (Json.mkObj [("configured", toJson key.isSome)])
 
+private def beginOAuth (r : Registry) (s : Session) (req : Network.WebApp.Request) : IO Network.WebApp.Response := do
+  let some caller := executionCaller s.cfg req | return error 401 "model OAuth requires configured bearer authentication"
+  match ← r.startOAuth s caller with
+  | .error message => return error 400 message
+  | .ok url =>
+    return Network.WebApp.responseLBS status200 [(hContentType, "application/json"), (hCacheControl, "no-store")]
+      (Json.mkObj [("authorizationUrl", .str url), ("expiresIn", toJson (300 : Nat))]).compress
+
+private def browserResult (code : Nat) (message : String) : Network.WebApp.Response :=
+  Network.WebApp.responseLBS (statusOf code) [(hContentType, "text/plain; charset=utf-8"),
+    (hCacheControl, "no-store"), (Data.CI.mk' "Referrer-Policy", "no-referrer")] message
+
+private def oauthCallback (r : Registry) (req : Network.WebApp.Request) : IO Network.WebApp.Response := do
+  let decode (value : String) := Network.URI.unEscapeString' (value.replace "+" " ")
+  let unique (name : String) : Except String (Option String) :=
+    match req.queryString.filter (fun param => decode param.1 == name) with
+    | [] => .ok none
+    | [(_, some value)] => .ok (some (decode value))
+    | _ => .error "invalid OAuth callback parameters"
+  let .ok (some state) := unique "state" | return browserResult 400 "Invalid OAuth state."
+  let .ok code := unique "code" | return browserResult 400 "Invalid OAuth callback parameters."
+  let .ok refused := unique "error" | return browserResult 400 "Invalid OAuth callback parameters."
+  try
+    match ← r.finishOAuth state (if refused.isSome then none else code) with
+    | .ok () => return browserResult 200 "Model authorization is ready. Return to your Lode client."
+    | .error reason => return browserResult 400 reason
+  catch _ => return browserResult 502 "The configured issuer could not complete model authorization. Start a new attempt."
+
 /-- Route one request. -/
 def route (r : Registry) (req : Network.WebApp.Request) : IO Network.WebApp.Response := do
   let m := req.requestMethod
   let is (x : StdMethod) := m == .standard x
   match req.pathInfo with
+  | ["v0", "model-oauth", "callback"] =>
+    if is .GET then oauthCallback r req else return error 404 "not found"
   | path =>
     unless authorized r.cfg req do return error 401 "missing or wrong bearer token"
     match path with
@@ -211,6 +241,8 @@ def route (r : Registry) (req : Network.WebApp.Request) : IO Network.WebApp.Resp
           | .ok _ => return json 200 (← s.status)
       | ["model-key"] =>
         if is .PUT then modelKey s req else return error 404 "not found"
+      | ["model-oauth"] =>
+        if is .POST then beginOAuth r s req else return error 404 "not found"
       | ["diff"] =>
         unless is .GET do return error 404 "not found"
         return text (← Workspace.diff s.wctx (checkoutDir s.cfg s.id) (← s.info.get).workspace)

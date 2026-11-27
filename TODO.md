@@ -2,14 +2,18 @@
 
 ## Lode architecture follow-up
 
-- [ ] Wire browser SSO through a configured issuer or Typednotes and Liaison.
-  Bind pending callback state to the session and use existing credential refresh.
-- [ ] Extend MCP support to dynamic discovery, interleaved protocol messages,
-  Streamable HTTP and brokered authorization.
-- [ ] Agree on native cell packages with Lun and Typednotes. Check the artifact
-  manifest, trust roots, target ABI, signing format and storage before loading code.
-- [ ] Compare CLI and tool lifecycle behavior with Pi using scripted providers.
-
+- [ ] Add the Typednotes UI handoff for browser auth, qualify live provider
+  OAuth flows and wire app-managed warrant refresh.
+  The existing direct OAuth adapter accepts a configured bearer-compatible
+  issuer. Provider-specific SSO and revocation still need integration.
+- [ ] Extend MCP to interleaved stdio messages, reverse requests, persistent
+  and resumable SSE, and protocol cancellation for HTTP. Liaison still needs
+  a named MCP operation with a server and tool bound to the live authority.
+- [ ] Integrate Lun's checked compiler output directly with cell export.
+  Cover Lun's compiler attestation, placement calls and Typednotes'
+  content-addressed storage and key management. The CLI builds a signed
+  Linen v2 worker with an operator's build record and can independently
+  admit a prebuilt package.
 See [the architecture](docs/architecture/lode.md) for the current contracts.
 
 Suggestions from the linen v1.6.1 dependency review (2026-09-28), done in
@@ -44,12 +48,6 @@ What remains is noted per item.
   `parseRetryAfterMillis`/`delayFor` from `Client.Response`; `Model.complete`
   uses them with a `RetryPolicy`, follows a relayed `Retry-After`
   (`test/liaison.sh` checks it), and still stops on abort.
-- [ ] **If lode ever screens generated sources with `System.GitFn.Policy`**
-  (it has no leak exposure today — no in-process `importModules`): point its
-  search path at the shared `{cache}/linen/{rev}`, never a session's own
-  `.lake/packages/linen`, or linen keeps one environment per session for the
-  life of the process. And the policy rejects `partial`, which lode's prompt
-  allows (`Prompt.lean`). The natural consumer is lun. Nothing to do now.
 
 ## Workarounds that linen could remove
 

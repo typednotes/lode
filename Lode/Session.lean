@@ -38,6 +38,7 @@ import Lode.Compaction
 import Lode.Lun
 import Lode.Workspace
 import Lode.Secrets
+import Lode.OAuth
 
 namespace Lode
 
@@ -60,6 +61,8 @@ structure Config where
   modelApiKey : Option String := none
   /-- Managed direct key for the same endpoint as `defaultModel`. -/
   modelKeySecret : Option Secrets.ModelKey := none
+  /-- OAuth issuer for the configured direct model. -/
+  modelOAuth : Option OAuth.Config := none
   /-- Local mode: `file://` repositories and the `scripted` model (tests). -/
   allowLocal : Bool := false
   /-- At most this many model calls per run. -/
@@ -70,7 +73,7 @@ structure Config where
   /-- Pre-built packages: `{cache}/linen/{rev}`. -/
   packageCache : Option FilePath := none
   /-- What new projects should require. -/
-  linenRev : String := "v3.0.0"
+  linenRev : String := "bcfec9a81d6e738ecb273f89e2102b4712d8e160"
   /-- The Lean toolchain for new projects. -/
   toolchain : String := "leanprover/lean4:v4.36.0"
   /-- The tools included in this executable. The session policy still gates them. -/
@@ -155,6 +158,7 @@ structure Session where
   creds : IO.Ref CredentialSet
   /-- A direct model key supplied by the authenticated client. -/
   directModelKey : IO.Ref (Option String)
+  modelOAuth : Std.Mutex OAuth.SessionState
   control : Std.Mutex Control
   abort : IO.Ref Bool
   todos : IO.Ref (Array Tools.Todo)
@@ -200,7 +204,7 @@ private def make (cfg : Config) (m : Meta) (entries : Array Entry) : IO Session 
   let policy ← IO.ofExcept ((Tools.BoundedPolicy.initial ceiling |>.narrow m.tools).mapError IO.userError)
   return {
     cfg, id := m.id, info := ← IO.mkRef m, metaLock := ← Std.Mutex.new (), entries := ← IO.mkRef entries
-    creds := ← IO.mkRef {}, directModelKey := ← IO.mkRef none
+    creds := ← IO.mkRef {}, directModelKey := ← IO.mkRef none, modelOAuth := ← Std.Mutex.new {}
     control := ← Std.Mutex.new {}, abort := ← IO.mkRef false
     todos := ← IO.mkRef m.todos, steps := ← IO.mkRef 0, toolCeiling := ceiling
     toolPolicy := ← Std.Mutex.new policy }
@@ -314,11 +318,16 @@ structure StatusView where
   requestKey : Option String := none
   question : Option PendingQuestion := none
   modelKeyUrl : Option String := none
+  modelOAuthUrl : Option String := none
+  modelOAuthConnected : Bool := false
   deriving ToJson
 
 private def directKeyTarget (cfg : Config) (model : Model.Config) : Bool :=
   cfg.token.isSome && model.api != .scripted &&
     cfg.defaultModel.any (fun configured => configured.baseUrl == model.baseUrl && configured.api == model.api)
+
+private def oauthTarget (cfg : Config) (model : Model.Config) : Option OAuth.Config :=
+  if directKeyTarget cfg model && OAuth.supports model.api then cfg.modelOAuth else none
 
 /-- Accept an authenticated client's key for the operator-selected endpoint
     and API. `none` clears the in-memory override. -/
@@ -347,6 +356,8 @@ def Session.status (s : Session) : IO Json := do
     credentials := { repo := cr.repo.isSome, model := cr.model.isSome, lun := cr.lun.isSome, execution := cr.execution.isSome }
     error := m.error, requestKey := m.requestKey, question := m.question
     modelKeyUrl := if directKeyTarget s.cfg m.model then some s!"/v0/sessions/{s.id}/model-key" else none
+    modelOAuthUrl := (oauthTarget s.cfg m.model).map (fun _ => s!"/v0/sessions/{s.id}/model-oauth")
+    modelOAuthConnected := ← s.modelOAuth.atomically (m := IO) do return (← get).grant.isSome
     checkout := match m.checkout.getD .ready with | .opening => "opening" | .ready => "ready" | .failed => "failed" } : StatusView)
 
 -- ── What a run needs ────────────────────────────────────────────────────────
@@ -362,6 +373,14 @@ def Session.transport (s : Session) : IO Model.Transport := do
     return .liaison url c
   if directKeyTarget s.cfg m then
     if let some key ← s.directModelKey.get then return .direct key
+    if let some issuer := oauthTarget s.cfg m then
+      let refreshed ← s.modelOAuth.atomically (m := IO) do
+        let state ← get
+        let some grant := state.grant | return none
+        let grant ← issuer.current grant
+        set { state with grant := some grant }
+        return some grant.access
+      if let some token := refreshed then return .direct token
   if let some defaultModel := s.cfg.defaultModel then
     if defaultModel.baseUrl == m.baseUrl then
       if let some key := s.cfg.modelApiKey then return .direct key
@@ -729,10 +748,11 @@ structure Registry where
   cfg : Config
   sessions : Std.Mutex (Std.HashMap String Session)
   creation : Std.Mutex Unit
+  pendingOAuth : Std.Mutex (List OAuth.Pending)
 
 def Registry.new (cfg : Config) : IO Registry := do
   IO.FS.createDirAll (sessionsDir cfg)
-  return { cfg, sessions := ← Std.Mutex.new {}, creation := ← Std.Mutex.new () }
+  return { cfg, sessions := ← Std.Mutex.new {}, creation := ← Std.Mutex.new (), pendingOAuth := ← Std.Mutex.new [] }
 
 /-- A session by id, loaded from disk the first time. -/
 def Registry.get? (r : Registry) (id : String) : IO (Option Session) := do
@@ -743,6 +763,41 @@ def Registry.get? (r : Registry) (id : String) : IO (Option Session) := do
     let s ← Session.load r.cfg id
     modify (·.insert id s)
     return some s
+
+/-- An authenticated client can request an OAuth authorization URL for the
+    configured model. Issuing a new attempt replaces the old pending state. -/
+def Registry.startOAuth (r : Registry) (s : Session) (_caller : Runtime.AuthenticatedCaller) : IO (Except String String) := do
+  let some issuer := oauthTarget s.cfg (← s.info.get).model |
+    return .error "this session has no configured model OAuth issuer"
+  let (pending, url) ← issuer.start s.id
+  r.pendingOAuth.atomically (m := IO) do
+    let now ← IO.monoMsNow
+    let active := (← get).filter (fun old => old.expiresAt > now && old.sessionId != s.id)
+    if active.length ≥ 256 then return .error "too many pending model authorizations"
+    s.modelOAuth.atomically (m := IO) (modify fun state => { state with attempt := some pending.state })
+    set (pending :: active)
+    return .ok url
+
+/-- Consume the browser state once, exchange the code and install a grant
+    only if a newer authorization has not superseded it. -/
+def Registry.finishOAuth (r : Registry) (state : String) (code : Option String) : IO (Except String Unit) := do
+  unless state.length == 64 && state.all (fun c => c.isDigit || ['a', 'b', 'c', 'd', 'e', 'f'].contains c) do
+    return .error "invalid or expired OAuth state"
+  let consumed ← r.pendingOAuth.atomically (m := IO) do
+    let now ← IO.monoMsNow
+    let active := (← get).filter (fun pending => pending.expiresAt > now)
+    let sameState (pending : OAuth.Pending) := Crypto.ConstantTime.eqString pending.state state
+    set (active.filter (fun pending => !sameState pending))
+    return active.find? sameState
+  let some pending := consumed | return .error "invalid or expired OAuth state"
+  let some code := code | return .error "browser authorization was declined or did not include a code"
+  let some s ← r.get? pending.sessionId | return .error "session is unavailable"
+  let some issuer := oauthTarget s.cfg (← s.info.get).model | return .error "OAuth issuer is unavailable"
+  let grant ← issuer.exchange pending code
+  s.modelOAuth.atomically (m := IO) do
+    if (← get).attempt != some pending.state then return .error "browser authorization was superseded"
+    set ({ grant := some grant } : OAuth.SessionState)
+    return .ok ()
 
 /-- Create a session and register it. -/
 def Registry.create (r : Registry) (spec : SessionSpec) : IO Session :=
@@ -779,6 +834,9 @@ def Registry.ids (r : Registry) : IO (Array String) := do
 /-- Delete a session that is not running. -/
 def Registry.delete (r : Registry) (s : Session) : IO Bool := do
   if ← s.running then return false
+  r.pendingOAuth.atomically (m := IO) do
+    modify (·.filter (fun pending => pending.sessionId != s.id))
+    s.modelOAuth.atomically (m := IO) (set ({} : OAuth.SessionState))
   r.sessions.atomically (m := IO) (modify (·.erase s.id))
   IO.FS.removeDirAll (sessionDir r.cfg s.id)
   return true

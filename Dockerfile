@@ -7,7 +7,6 @@
 # linen's FFI), read from linen's own list at LINEN_REF.
 #
 #   podman build -t lode .
-#   podman build --build-arg LINEN_REF=v3.0.0 -t lode .
 #
 # LINEN_REF is the linen version pre-built into the package cache and the
 # one new projects are told to require (LODE_LINEN_REV). A workspace whose
@@ -15,12 +14,12 @@
 # its linen from scratch (slow, but correct).
 
 FROM docker.io/library/ubuntu:24.04 AS base
-ARG LINEN_REF=v3.0.0
+ARG LINEN_REF=bcfec9a81d6e738ecb273f89e2102b4712d8e160
 # linen's native build dependencies, from linen's own list at LINEN_REF
-# (`ci/native-deps/apt.txt`), plus what lode itself runs: tar, gzip, bash.
+# (`ci/native-deps/apt.txt`), plus tar, gzip, bash and OpenPGP tooling.
 ADD https://raw.githubusercontent.com/typednotes/linen/${LINEN_REF}/ci/native-deps/apt.txt /tmp/linen-apt.txt
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      tar gzip bash $(sed 's/#.*//' /tmp/linen-apt.txt) \
+      tar gzip bash gnupg $(sed 's/#.*//' /tmp/linen-apt.txt) \
     && rm -rf /var/lib/apt/lists/*
 ENV ELAN_HOME=/opt/elan \
     PATH=/opt/elan/bin:${PATH} \
@@ -69,6 +68,7 @@ COPY --from=builder /src/.lake/build/bin/lode /usr/local/bin/lode
 ENV LODE_WORKDIR=/var/lib/lode \
     LODE_PACKAGE_CACHE=/opt/lode/cache \
     LODE_LINEN_REV=${LINEN_REF}
+WORKDIR /var/lib/lode
 USER lode
 VOLUME /var/lib/lode
 EXPOSE 8080

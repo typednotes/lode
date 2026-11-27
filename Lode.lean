@@ -18,6 +18,10 @@ import Lode.Server
 import Lode.Cli
 import Lode.Settings
 import Lode.Secrets
+import Lode.OAuth
+import Lode.Cell
+import Lode.CellPackage
+import Lode.Output
 import Lode.Extension
 import Lode.Mcp
 import Lode.App

@@ -11,11 +11,11 @@ this project. `CLAUDE.md` imports this file; edit this one.
 `linen`, speaking to liaison with liaison's own wire module
 `Liaison.Wire`) that runs model-driven sessions over a branch of a
 git repository and writes the Lean projects `lun` builds and serves
-(functions, graphs, `lun.json`; lun's and linen's vocabulary — lun ≥ 0.2.0
-has no `cells`/`dags` aliases, and neither has lode). lode is the writer; lun is the runner — do not confuse
-the two. See `README.md` for the API and the design.
+(functions, graphs and `lun.json`). Lode also exports signed Linen cell
+packages, executables, Git coordinates and source archives. Lode is the writer
+and Lun is the runner. See `README.md` for the API and the design.
 
-The development branch uses **Linen 3.0.0** in its package lock, image cache,
+The development branch uses **Linen 5.0.0** for its cell API, image cache,
 and new-project defaults. The **Lode 0.4.2 / Lun 0.3.0 / Typednotes 0.7.2 /
 Linen 1.10.0 / Liaison 0.6.0** release set is documented in `README.md` and
 `docs/release-0.4.2.md`. Publishing local release tags and deploying remain
@@ -369,7 +369,10 @@ IO modules:
 - `Lode/Http.lean` — one request over linen's client.
 - `Lode/Settings.lean` — explicit operator TOML or JSON settings and environment precedence.
 - `Lode/Secrets.lean` — endpoint-bound model API key versions in Typednotes Secrets.
-- `Lode/Extension.lean`, `Lode/Mcp.lean` — compile-time tool catalog, typed decoders and bounded stdio MCP calls.
+- `Lode/OAuth.lean` — configured direct-model browser authorization with PKCE and in-memory refresh.
+- `Lode/Extension.lean`, `Lode/Mcp.lean` — compile-time catalog, typed decoders and stdio or HTTP MCP calls.
+- `Lode/Cell.lean` — native cell manifests, digest verification and optional OpenPGP signing.
+- `Lode/CellPackage.lean`, `Lode/Output.lean` — signed Linen packages and published session exports.
 - `Lode/Workspace.lean` — the checkout: `open` (public/local git clone, or
   brokered immutable branch/tree/file views materialized using private
   `NativeFile` witnesses), `changes` (`git diff --raw` against `localBase`),
@@ -394,6 +397,11 @@ IO modules:
 lake test          # unit tests
 python3 test/settings.py     # settings and direct key handoff via real local services
 lake exe lode-mcp-smoke      # compiled MCP extension subprocess
+python3 test/mcp_http.py     # compiled Streamable HTTP extension
+python3 test/cell_artifact.py # digest and OpenPGP verification with a disposable keyring
+python3 test/output.py       # all four session outputs, including signed Linen cells
+python3 Examples/cell-addition/test.py # published Lean cell and consumer
+python3 test/pi_parity.py    # opt-in comparison with a locally installed Pi
 test/e2e.sh                   # scripted model, file:// repository, real git/lake
 test/liaison.sh               # GitHub/GitLab/Anthropic through test/mock_liaison.py
 python3 test/native.py .lake/build/bin/lode # all native protocols, policy and restart

@@ -7,6 +7,7 @@
 -/
 import Lode.Session
 import Lode.Settings
+import Lode.Output
 
 namespace Lode.Cli
 
@@ -32,8 +33,21 @@ def usage : String :=
   "  lode run --repo PATH_OR_URL [--branch main] [--path DIR] [--agent build|plan]\n" ++
   "  lode run --config FILE               Launch from a session-request JSON file\n" ++
   "  lode run --resume ID                 Continue a persisted session\n\n" ++
+  "  lode output ID [--format cell|executable|git|source-package] [--output NEW_DIR]\n" ++
+  "      Default: cell, output/<format>/<session>. Build a signed cell with\n" ++
+  "      --target NAME --build-record FILE --key FINGERPRINT, or verify a package\n" ++
+  "      with --package DIR --admission FILE.\n" ++
+  "      Executables require --target NAME. Git returns immutable coordinates as JSON.\n" ++
+  "      Example: lode output ID --format source-package --output output/release-source\n\n" ++
+  "  lode oauth BASE_URL ID [--open]       Start model OAuth using LODE_TOKEN\n" ++
+  "      Example: lode oauth http://127.0.0.1:8080 ID --open\n\n" ++
   "  lode secrets store-model-key [--settings FILE] [--yes | --dry-run]\n" ++
   "      Store LODE_MODEL_API_KEY at the configured Secrets KV path.\n\n" ++
+  "  lode cell manifest IDENTITY_JSON ARTIFACT\n" ++
+  "  lode cell sign MANIFEST ARTIFACT --key FINGERPRINT\n" ++
+  "  lode cell verify MANIFEST ARTIFACT [--signature FILE --keyring FILE]\n\n" ++
+  "  lode cell package BUILD_JSON WORKER NEW_DIR --key FINGERPRINT\n" ++
+  "      Package a checked compiler worker in Linen's v2 format.\n\n" ++
   "run reads one UTF-8 task from stdin through EOF (at most 1 MB).\n" ++
   "Assistant answers go to stdout; progress and tool results go to stderr.\n" ++
   "Exit codes: 0 finished, 1 run/setup failure, 2 invalid arguments/stdin.\n" ++
@@ -194,6 +208,88 @@ private def repositoryUrl (repo : String) : IO String := do
   if (repo.splitOn "://").length > 1 then
     throw (IO.userError "--repo: use a local path, file:// or https:// URL")
   return "file://" ++ (← IO.FS.realPath repo).toString
+
+/-- Command inputs for exporting an existing session. -/
+structure OutputOptions where
+  id : String
+  request : Output.Request
+  destination : System.FilePath
+  settings : Option String
+
+/-- Parse the output format and reject inapplicable or duplicate flags. -/
+def OutputOptions.parse (id : String) (args : List String) : Except String OutputOptions := do
+  unless Validate.sessionId id do throw "output requires a valid session id"
+  let rec flags (args : List String) (seen : List (String × String)) :
+      Except String (List (String × String)) :=
+    match args with
+    | [] => pure seen
+    | flag :: value :: rest => do
+      unless ["--format", "--output", "--target", "--package", "--admission", "--settings",
+          "--build-record", "--key"].contains flag do
+        throw s!"unknown output option: {flag}"
+      unless !value.isEmpty && !value.startsWith "--" do throw s!"{flag} requires a value"
+      unless (seen.lookup flag).isNone do throw s!"{flag} given more than once"
+      flags rest ((flag, value) :: seen)
+    | [flag] => throw s!"{flag} requires a value"
+  let opts ← flags args []
+  let format ← Output.Format.parse ((opts.lookup "--format").getD "cell")
+  let required (flag : String) : Except String String :=
+    match opts.lookup flag with
+    | some value => .ok value
+    | none => .error s!"{format.name} output requires {flag}"
+  let allowed : List String := match format with
+    | .cell => ["--package", "--admission", "--output", "--target", "--build-record", "--key"]
+    | .executable => ["--target", "--output"]
+    | .git => []
+    | .sourcePackage => ["--output"]
+  for (flag, _) in opts do
+    unless ["--settings", "--format"].contains flag || allowed.contains flag do
+      throw s!"{flag} is unavailable for {format.name} output"
+  let request ← match format with
+    | .cell => do
+      if (["--target", "--build-record", "--key"].any fun key => (opts.lookup key).isSome) then
+        unless (opts.lookup "--package").isNone && (opts.lookup "--admission").isNone do
+          throw "choose either compiler inputs or package admission"
+        pure (.cell (.compile (← required "--target") ⟨← required "--build-record"⟩ (← required "--key")))
+      else pure (.cell (.admitted ⟨← required "--package"⟩ ⟨← required "--admission"⟩))
+    | .executable => pure (.executable (← required "--target"))
+    | .git => pure .git
+    | .sourcePackage => pure .sourcePackage
+  let destination := (opts.lookup "--output").getD s!"output/{format.name}/{id}"
+  return ⟨id, request, ⟨destination⟩, opts.lookup "--settings"⟩
+
+/-- Export a persisted session and print a single JSON receipt. -/
+def output (opts : OutputOptions) : IO Unit := do
+  let registry ← Registry.new (← Settings.runtime (← Settings.load opts.settings) true)
+  let some session ← registry.get? opts.id | throw (IO.userError s!"session {opts.id} not found")
+  IO.println (toJson (← Output.write session opts.request opts.destination)).compress
+
+/-- Request a browser authorization URL from the selected Lode instance.
+The URL is sent to stdout and can also open in the local default browser. -/
+def modelOAuth (base id : String) (openBrowser : Bool) : IO Unit := do
+  unless Validate.sessionId id do throw (IO.userError "oauth requires a valid session id")
+  unless (Validate.credentialUrl base true).isSome do
+    throw (IO.userError "oauth requires an HTTPS Lode base URL or loopback HTTP")
+  let token : String ← (← IO.getEnv "LODE_TOKEN").getDM
+    (throw (IO.userError "set LODE_TOKEN for the selected Lode instance") : IO String)
+  unless Secrets.validKey token do throw (IO.userError "LODE_TOKEN is invalid")
+  let reply ← try
+    Http.request .POST (base ++ s!"/v0/sessions/{id}/model-oauth")
+      [("authorization", "Bearer " ++ token), ("accept", "application/json")] none 10000
+    catch _ => throw (IO.userError "could not reach the selected Lode instance")
+  unless Http.status reply == 200 && reply.body.size ≤ 65536 do
+    throw (IO.userError s!"Lode authorization request failed (HTTP {Http.status reply})")
+  let url : String ← IO.ofExcept
+    ((Json.parse (Http.text reply) >>= (·.getObjValAs? String "authorizationUrl")).mapError IO.userError)
+  let host := (url.splitOn "?").headD ""
+  unless (Validate.credentialUrl host true).isSome && url.utf8ByteSize ≤ 16384 &&
+      !url.any (fun c => c.toNat ≤ 32 || c.toNat == 127) do
+    throw (IO.userError "Lode returned an invalid authorization URL")
+  if openBrowser then
+    let opener := if System.Platform.isOSX then "open" else "xdg-open"
+    let result ← System.Process.run opener #[url] 10000 (env := Process.toolEnv)
+    unless result.ok do throw (IO.userError "could not open the browser. Run oauth without --open to print the URL")
+  IO.println url
 
 /-- Parse CLI launch configuration through the HTTP session parser. Runtime
     execution grants need authenticated HTTP ingress, not terminal input. -/

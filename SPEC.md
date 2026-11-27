@@ -28,13 +28,43 @@
 - **S6. MCP stdio.** A compiled MCP tool selects a fixed executable, argument
   vector and server tool. Lode negotiates protocol `2025-11-25`, requires
   `tools`, sends `notifications/initialized`, and correlates the `tools/call`
-  response by ID. The adapter accepts servers that answer each request with
+  response by ID. The stdio adapter accepts servers that answer each request with
   one JSON-RPC result. The worker is reaped on completion, interruption and
   failure. Calls share a deadline of at most 30 seconds and bound the parsed
   reply to 64 KiB.
+- **S7. Browser OAuth.** Authenticated sessions using the configured direct
+  bearer-compatible endpoint may request an authorization URL. Its state is
+  single-use and expires after five minutes. The callback exchanges the code
+  at the configured token endpoint with the original PKCE S256 verifier.
+  The session serializes refresh, honors replacement refresh tokens, and
+  keeps tokens and pending state in memory. A model warrant takes precedence.
+  The terminal launcher requests the URL using the selected Lode instance's
+  bearer and can pass the URL to the local browser without that bearer.
+- **S8. MCP HTTP.** A compiled adapter uses an operator-selected endpoint and
+  optional bearer. It follows initialization and session headers, accepts
+  JSON or finite POST SSE replies, and can read up to eight discovery pages.
+  The compiled tool name and its decoder constrain what can execute. Server
+  requests cannot invoke a client operation. Session closure is best effort.
+- **S9. Native cell manifests.** Version 1 records the three authoring digests,
+  pinned Git coordinates, toolchain, target, ABI, and the artifact's SHA-256
+  and byte length. Local verification checks the bytes and can require a
+  detached OpenPGP signature verified by a supplied keyring. Provenance fields
+  are producer declarations. Compilation, admission and loading are Lun responsibilities.
+- **S10. Session exports.** An explicit export from a ready idle session uses
+  the recorded remote commit and matching local Git tree. Pending edits are
+  refused. The default format builds and signs a Linen v2 cell using
+  an operator's compiler record, or admits an existing package using
+  independent trust inputs. Its source must match the session.
+  Executable export builds the selected Lake target in a fresh snapshot.
+  Git output returns immutable coordinates. Source package output is a gzip
+  archive of the tracked project tree. Files are staged before publication to
+  a new directory. Failed exports leave no deliverable at that destination.
 
 The [architecture](docs/architecture/lode.md) describes the boundaries with
 Liaison, Lun and Typednotes. Pure guards live in
 [`LodeTest/Lode/SettingsTest.lean`](LodeTest/Lode/SettingsTest.lean). The real
-process tests are [`test/settings.py`](test/settings.py) and
-[`test/McpSmoke.lean`](test/McpSmoke.lean).
+process tests are [`test/settings.py`](test/settings.py),
+[`test/McpSmoke.lean`](test/McpSmoke.lean), [`test/mcp_http.py`](test/mcp_http.py),
+and [`test/cell_artifact.py`](test/cell_artifact.py). The
+[addition example](Examples/cell-addition/README.md) builds a cell's native
+library, verifies its manifest and runs its consumer from a published local Git commit.
