@@ -70,7 +70,7 @@ structure Config where
   /-- Pre-built packages: `{cache}/linen/{rev}`. -/
   packageCache : Option FilePath := none
   /-- What new projects should require. -/
-  linenRev : String := "037925bc5068c54efd86690b78b258b9c6787959"
+  linenRev : String := "bcfec9a81d6e738ecb273f89e2102b4712d8e160"
   /-- The Lean toolchain for new projects. -/
   toolchain : String := "leanprover/lean4:v4.36.0"
   /-- The tools included in this executable. The session policy still gates them. -/
